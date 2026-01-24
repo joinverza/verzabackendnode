@@ -19,7 +19,8 @@ import { createEscrowRouter } from "./routers/escrow.js";
 import { createGovernanceRouter } from "./routers/governance.js";
 import { createProofsRouter } from "./routers/proofs.js";
 import { createSearchRouter } from "./routers/search.js";
-import { createStubRouter } from "./routers/stubs.js";
+import { createAdminBridgeRouter } from "./routers/adminBridge.js";
+import { createAdminInstitutionsRouter } from "./routers/adminInstitutions.js";
 import { createVerifiersRouter } from "./routers/verifiers.js";
 import { createVerificationsRouter } from "./routers/verifications.js";
 
@@ -51,8 +52,8 @@ export function registerMainApiRoutes(app: Express, ctx: MainApiContext) {
   app.use("/api/v1", api);
 
   const admin = express.Router();
-  admin.use("/bridge", requireAdmin(ctx), createStubRouter());
-  admin.use("/institutions", requireAdmin(ctx), createStubRouter());
+  admin.use("/bridge", requireAdmin(ctx), createAdminBridgeRouter(ctx));
+  admin.use("/institutions", requireAdmin(ctx), createAdminInstitutionsRouter(ctx));
   app.use("/admin", admin);
 
   const institution = express.Router();

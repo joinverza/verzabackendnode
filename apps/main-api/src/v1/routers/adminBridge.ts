@@ -1,0 +1,146 @@
+import type { Router } from "express";
+
+import express from "express";
+import { z } from "zod";
+
+import { badRequest, notFound } from "@verza/http";
+
+import type { MainApiContext } from "../routes.js";
+
+const listSchema = z.object({
+  limit: z.string().regex(/^\d+$/).optional(),
+  offset: z.string().regex(/^\d+$/).optional()
+});
+
+const txIdSchema = z.object({ id: z.string().uuid() });
+
+const setTxStatusSchema = z.object({
+  status: z.string().min(1)
+});
+
+const credentialIdSchema = z.object({ credential_id: z.string().min(1) });
+
+const upsertCredentialMetadataSchema = z.object({
+  credential_id: z.string().min(1),
+  midnight_address: z.string().optional(),
+  cardano_escrow_id: z.string().optional(),
+  verifier_did: z.string().optional(),
+  status: z.string().optional()
+});
+
+export function createAdminBridgeRouter(ctx: MainApiContext): Router {
+  const router = express.Router();
+
+  router.get("/transactions", async (req, res, next) => {
+    try {
+      const q = listSchema.parse(req.query ?? {});
+      const limit = Math.min(Number(q.limit ?? "50"), 200);
+      const offset = Number(q.offset ?? "0");
+      if (!Number.isFinite(limit) || limit <= 0) throw badRequest("invalid_limit", "Invalid limit");
+      if (!Number.isFinite(offset) || offset < 0) throw badRequest("invalid_offset", "Invalid offset");
+
+      const result = await ctx.pool.query(
+        "select id, midnight_tx_hash, cardano_tx_hash, operation_type, status, retry_count, created_at, updated_at from cross_chain_transactions order by created_at desc limit $1 offset $2",
+        [limit, offset]
+      );
+      res.json(result.rows);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get("/transactions/:id", async (req, res, next) => {
+    try {
+      const { id } = txIdSchema.parse(req.params);
+      const result = await ctx.pool.query(
+        "select id, midnight_tx_hash, cardano_tx_hash, operation_type, status, retry_count, created_at, updated_at from cross_chain_transactions where id=$1 limit 1",
+        [id]
+      );
+      const row = result.rows[0];
+      if (!row) throw notFound("transaction_not_found", "Transaction not found");
+      res.json(row);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post("/transactions/:id/status", async (req, res, next) => {
+    try {
+      const { id } = txIdSchema.parse(req.params);
+      const body = setTxStatusSchema.parse(req.body ?? {});
+      const ts = new Date();
+      const updated = await ctx.pool.query("update cross_chain_transactions set status=$1, updated_at=$2 where id=$3", [
+        body.status,
+        ts,
+        id
+      ]);
+      if (!updated.rowCount) throw notFound("transaction_not_found", "Transaction not found");
+      res.json({ status: "ok" });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post("/transactions/:id/retry", async (req, res, next) => {
+    try {
+      const { id } = txIdSchema.parse(req.params);
+      const ts = new Date();
+      const updated = await ctx.pool.query(
+        "update cross_chain_transactions set retry_count=retry_count+1, status='retry_requested', updated_at=$1 where id=$2",
+        [ts, id]
+      );
+      if (!updated.rowCount) throw notFound("transaction_not_found", "Transaction not found");
+      res.json({ status: "ok" });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get("/credential-metadata/:credential_id", async (req, res, next) => {
+    try {
+      const { credential_id } = credentialIdSchema.parse(req.params);
+      const result = await ctx.pool.query(
+        "select credential_id, midnight_address, cardano_escrow_id, verifier_did, status, created_at from credential_metadata where credential_id=$1 limit 1",
+        [credential_id]
+      );
+      const row = result.rows[0];
+      if (!row) throw notFound("credential_metadata_not_found", "Credential metadata not found");
+      res.json(row);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post("/credential-metadata/upsert", async (req, res, next) => {
+    try {
+      const body = upsertCredentialMetadataSchema.parse(req.body ?? {});
+      const now = new Date();
+      await ctx.pool.query(
+        `
+        insert into credential_metadata (credential_id, midnight_address, cardano_escrow_id, verifier_did, status, created_at)
+        values ($1,$2,$3,$4,$5,$6)
+        on conflict (credential_id)
+        do update set
+          midnight_address=coalesce(excluded.midnight_address, credential_metadata.midnight_address),
+          cardano_escrow_id=coalesce(excluded.cardano_escrow_id, credential_metadata.cardano_escrow_id),
+          verifier_did=coalesce(excluded.verifier_did, credential_metadata.verifier_did),
+          status=coalesce(excluded.status, credential_metadata.status)
+        `,
+        [
+          body.credential_id,
+          body.midnight_address ?? null,
+          body.cardano_escrow_id ?? null,
+          body.verifier_did ?? null,
+          body.status ?? null,
+          now
+        ]
+      );
+      res.json({ status: "ok" });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  return router;
+}
+

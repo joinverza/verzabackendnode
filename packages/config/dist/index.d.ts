@@ -35,9 +35,17 @@ export declare function createIdentityOrchestratorConfig(env: NodeJS.ProcessEnv)
     PORT: number;
     LOG_LEVEL: string;
     CORS_ALLOWED_ORIGINS: string[];
+    JWT_SECRET: string;
+    JWT_ISSUER: string;
+    S3_FORCE_PATH_STYLE: boolean;
     IDENTITY_DATABASE_URL: string;
     INFERENCE_URL: string;
     NODE_ENV?: string | undefined;
+    S3_ENDPOINT?: string | undefined;
+    S3_ACCESS_KEY_ID?: string | undefined;
+    S3_SECRET_ACCESS_KEY?: string | undefined;
+    S3_BUCKET?: string | undefined;
+    S3_REGION?: string | undefined;
     REDIS_URL?: string | undefined;
 };
 //# sourceMappingURL=index.d.ts.map

@@ -52,7 +52,18 @@ const identityOrchestratorSchema = baseSchema.extend({
     PORT: z.coerce.number().default(8089),
     IDENTITY_DATABASE_URL: z.string().min(1),
     INFERENCE_URL: z.string().min(1),
-    REDIS_URL: z.string().optional()
+    REDIS_URL: z.string().optional(),
+    JWT_SECRET: z.string().min(16),
+    JWT_ISSUER: z.string().default(""),
+    S3_ENDPOINT: z.string().optional(),
+    S3_ACCESS_KEY_ID: z.string().optional(),
+    S3_SECRET_ACCESS_KEY: z.string().optional(),
+    S3_BUCKET: z.string().optional(),
+    S3_REGION: z.string().optional(),
+    S3_FORCE_PATH_STYLE: z
+        .string()
+        .optional()
+        .transform((v) => v === "1" || v?.toLowerCase() === "true")
 });
 export function createIdentityOrchestratorConfig(env) {
     return identityOrchestratorSchema.parse(env);
