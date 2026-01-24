@@ -15,6 +15,7 @@ import { createIdentityVerificationsRouter } from "./routers/identityVerificatio
 import { createInstitutionRouter } from "./routers/institution.js";
 import { createMeRouter } from "./routers/me.js";
 import { createNotificationsRouter } from "./routers/notifications.js";
+import { createProofsRouter } from "./routers/proofs.js";
 import { createStubRouter } from "./routers/stubs.js";
 import { createVerifiersRouter } from "./routers/verifiers.js";
 
@@ -33,8 +34,7 @@ export function registerMainApiRoutes(app: Express, ctx: MainApiContext) {
   api.use("/credentials", requireUser(ctx), createCredentialsRouter(ctx));
   api.use("/consents", requireUser(ctx), createConsentsRouter(ctx));
 
-  api.all("/proofs/*", requireUser(ctx), createStubRouter());
-  api.use("/proofs", requireUser(ctx), createStubRouter());
+  api.use("/proofs", requireUser(ctx), createProofsRouter(ctx));
   api.use("/verifiers", requireUser(ctx), createVerifiersRouter(ctx));
   api.use("/escrow", requireUser(ctx), createStubRouter());
   api.use("/governance", requireUser(ctx), createStubRouter());

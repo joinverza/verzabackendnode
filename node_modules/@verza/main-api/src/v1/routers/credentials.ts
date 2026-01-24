@@ -9,6 +9,7 @@ import { decryptJson, encryptJson } from "@verza/crypto";
 import { badRequest, notFound } from "@verza/http";
 
 import type { MainApiContext } from "../routes.js";
+import { getOrCreateProofForCredential } from "./proofs.js";
 
 const storeSchema = z.object({
   type: z.string().min(1),
@@ -127,8 +128,10 @@ export function createCredentialsRouter(ctx: MainApiContext): Router {
 
   router.get("/:credentialId/proof", async (req, res, next) => {
     try {
-      credentialIdSchema.parse(req.params);
-      res.json({ status: "ok" });
+      const { credentialId } = credentialIdSchema.parse(req.params);
+      const type = typeof req.query.type === "string" && req.query.type.trim().length ? req.query.type.trim() : undefined;
+      const proof = await getOrCreateProofForCredential(ctx, { userId: req.auth.userId, credentialId, ...(type ? { type } : {}) });
+      res.json(proof);
     } catch (err) {
       next(err);
     }
@@ -221,4 +224,3 @@ export function createPublicSharesRouter(ctx: MainApiContext): Router {
 function base64Url(bytes: Buffer) {
   return bytes.toString("base64").replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
-
