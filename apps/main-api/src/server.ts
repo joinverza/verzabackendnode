@@ -20,6 +20,18 @@ export async function createMainApiServer() {
   });
 
   const app = createHttpApp({ logger, corsAllowedOrigins: config.CORS_ALLOWED_ORIGINS });
+  app.disable("x-powered-by");
+  app.use((req, res, next) => {
+    res.setHeader("x-content-type-options", "nosniff");
+    res.setHeader("x-frame-options", "DENY");
+    res.setHeader("referrer-policy", "no-referrer");
+    res.setHeader("permissions-policy", "geolocation=(), microphone=(), camera=()");
+    const xfProto = (req.header("x-forwarded-proto") ?? "").toLowerCase();
+    if (req.secure || xfProto === "https") {
+      res.setHeader("strict-transport-security", "max-age=15552000; includeSubDomains");
+    }
+    next();
+  });
   app.get("/health", (_req, res) => res.json({ status: "ok" }));
   app.get("/health/db", async (_req, res, next) => {
     try {
@@ -37,10 +49,20 @@ export async function createMainApiServer() {
     serverUrl: `http://localhost:${config.PORT}`
   });
 
-  app.get("/openapi.json", (_req, res) => res.json(openapi));
-  app.get("/swagger.json", (_req, res) => res.json(openapi));
+  app.get("/openapi.json", (_req, res) => {
+    res.setHeader("cache-control", "no-store");
+    res.setHeader("x-robots-tag", "noindex, nofollow");
+    res.json(openapi);
+  });
+  app.get("/swagger.json", (_req, res) => {
+    res.setHeader("cache-control", "no-store");
+    res.setHeader("x-robots-tag", "noindex, nofollow");
+    res.json(openapi);
+  });
   app.get("/swaggerdocs", (_req, res) => res.redirect(302, "/docs"));
   app.get("/docs", (_req, res) => {
+    res.setHeader("cache-control", "no-store");
+    res.setHeader("x-robots-tag", "noindex, nofollow");
     res.type("text/html").send(getSwaggerUiHtml({ specUrl: "/openapi.json", title: "Verza API Docs" }));
   });
 

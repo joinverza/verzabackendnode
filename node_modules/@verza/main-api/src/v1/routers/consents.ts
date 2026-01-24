@@ -39,6 +39,8 @@ export function createConsentsRouter(ctx: MainApiContext): Router {
       const body = createConsentSchema.parse(req.body ?? {});
       const now = new Date();
       const expiresAt = body.expires_at ? new Date(body.expires_at) : null;
+      if (expiresAt && Number.isNaN(expiresAt.getTime())) throw badRequest("invalid_expires_at", "Invalid expires_at");
+      if (expiresAt && expiresAt.getTime() <= now.getTime()) throw badRequest("invalid_expires_at", "expires_at must be in the future");
 
       const cred = await ctx.pool.query<{ ok: number }>("select 1 as ok from credentials where id=$1 and owner_user_id=$2 limit 1", [
         body.credential_id,
@@ -113,6 +115,11 @@ export function createConsentsRouter(ctx: MainApiContext): Router {
   router.get("/:consentId/audit", async (req, res, next) => {
     try {
       const { consentId } = consentIdSchema.parse(req.params);
+      const access = await ctx.pool.query<{ ok: number }>("select 1 as ok from consents where id=$1 and user_id=$2 limit 1", [
+        consentId,
+        req.auth.userId
+      ]);
+      if (!access.rowCount) throw notFound("consent_not_found", "Consent not found");
       const result = await ctx.pool.query(
         "select id,event_type,actor_type,actor_id,data_json,created_at from consent_audit_events where consent_id=$1 order by created_at asc",
         [consentId]

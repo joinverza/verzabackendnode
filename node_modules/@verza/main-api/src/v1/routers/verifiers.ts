@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import express from "express";
 import { z } from "zod";
 
-import { badRequest, notFound } from "@verza/http";
+import { forbidden, notFound } from "@verza/http";
 
 import type { MainApiContext } from "../routes.js";
 
@@ -105,7 +105,7 @@ export function createVerifiersRouter(ctx: MainApiContext): Router {
       );
       const row = existing.rows[0];
       if (!row) throw notFound("verifier_not_found", "Verifier not found");
-      if (row.owner_user_id !== req.auth.userId) throw badRequest("forbidden", "Only owner can update verifier");
+      if (row.owner_user_id !== req.auth.userId) throw forbidden("forbidden", "Only owner can update verifier");
 
       const mergedMetadata =
         body.metadata === undefined ? row.metadata_json : JSON.stringify({ ...(safeJson(row.metadata_json) as Record<string, unknown>), ...body.metadata });
