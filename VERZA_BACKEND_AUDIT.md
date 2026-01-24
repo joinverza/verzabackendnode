@@ -4,7 +4,7 @@ Last updated: 2026-01-24
 ## Executive Summary
 - The repository is a Turborepo-based Node.js + TypeScript monorepo with three Node services (`main-api`, `identity-gateway`, `identity-orchestrator`) and one Python service (`inference`).
 - Core platform foundations are present (config parsing, HTTP middleware, error envelope, logging, Postgres migrations, JWT + API-key auth, crypto utilities).
-- `main-api` implements auth, “me”, notifications, credentials storage/shares, and partial fiat-payments flows; many required product endpoints are currently stubbed.
+- `main-api` implements auth, “me”, notifications, credentials storage/shares, fiat-payments (partial), plus functional enterprise surfaces for **consents**, **verifiers**, and **identity verifications** (user + admin + institution attestation flows); several remaining product domains are still stubbed (proofs/escrow/governance/search/admin).
 - Identity subsystem is wired end-to-end at a minimal level (gateway proxy + S3 presign + orchestrator persistence + inference calls), but is missing auth semantics, state-machine completeness, and real async execution.
 
 ## Repo Layout (What Exists)
@@ -51,13 +51,15 @@ Last updated: 2026-01-24
   Implemented in [db/index.ts](file:///c:/Users/User/Desktop/verzabackendnode/packages/db/src/index.ts).
 
 ### apps/main-api (Implemented Routes)
-Server wiring (middlewares + health + docs placeholders + route registration): [main-api/server.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/server.ts)
+Server wiring (middlewares + health + OpenAPI + Swagger UI + route registration): [main-api/server.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/server.ts)
 
 #### Health + Docs (Public)
 - `GET /health` — returns `{status:"ok"}`
 - `GET /health/db` — runs `select 1`
 - `GET /health/redis` — placeholder returns `{status:"ok"}`
-- `GET /openapi.json`, `GET /swagger.json`, `GET /openapi.yaml`, `GET /swagger.yaml` — placeholder empty specs
+- `GET /openapi.json`, `GET /swagger.json` — OpenAPI 3.0.3 JSON (hand-authored spec)
+- `GET /docs` — Swagger UI
+- `GET /swaggerdocs` — redirects to `/docs`
 
 #### Auth (Public + User)
 Implemented in [auth.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/auth.ts):
@@ -110,10 +112,36 @@ Mounted at `/api/v1/institution/*` with `requireInstitutionApiKey` in [routes.ts
 - `GET /api/v1/institution/consents`
 - `GET /api/v1/institution/consents/:consent_id`
 - `GET /api/v1/institution/consents/:consent_id/audit`
-- `GET /api/v1/institution/consents/:consent_id/credential`
+- `GET /api/v1/institution/consents/:consent_id/credential` — enforces consent active/not-expired; returns field-minimized credential (never returns `encrypted_data`)
 - `GET /api/v1/institution/consents/:consent_id/identity`
+- `POST /api/v1/institution/identity/attestations` — completes verification as institution (requires active consent; writes audit event)
 - `GET /api/v1/institution/identity/verifications`
 - `GET /api/v1/institution/identity/verifications/:verification_id`
+
+#### Consents (User)
+Implemented in [consents.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/consents.ts):
+- `GET /api/v1/consents`
+- `POST /api/v1/consents` — validates credential ownership + institution active; validates `expires_at` is future; writes consent audit
+- `GET /api/v1/consents/:consentId`
+- `POST /api/v1/consents/:consentId/revoke` — idempotent revoke; writes consent audit
+- `GET /api/v1/consents/:consentId/audit` — requires user owns consent (prevents audit leakage)
+
+#### Verifiers (User)
+Implemented in [verifiers.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/verifiers.ts):
+- `POST /api/v1/verifiers` — creates verifier owned by current user
+- `GET /api/v1/verifiers` — lists owned verifiers; supports `?q=` search over active verifiers
+- `GET /api/v1/verifiers/:id` — owner can view; non-owner can view only if `status=active`
+- `PATCH /api/v1/verifiers/:id` — owner-only update (403 on non-owner)
+
+#### Identity Verifications (User + Admin)
+Implemented in [identityVerifications.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/identityVerifications.ts):
+- `POST /api/v1/identity/verifications/request` — creates a `pending` verification + audit event
+- `GET /api/v1/identity/verifications`
+- `GET /api/v1/identity/verifications/:id` — user can view own; admin can view any
+- `GET /api/v1/identity/verifications/:id/audit` — user can view own; admin can view any
+- `POST /api/v1/identity/verifications/:id/status` — user can view own; admin can view any
+- `POST /api/v1/identity/verifications/:id/cancel` — user can cancel pending
+- `POST /api/v1/identity/verifications/:id/complete` — **admin-only**, only completes `pending`; persists decision fields and writes audit event
 
 ### apps/identity-gateway (Completed Minimal Behavior)
 Implemented in [identity-gateway/server.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/identity-gateway/src/server.ts):
@@ -145,20 +173,16 @@ Implemented in [inference/app.py](file:///c:/Users/User/Desktop/verzabackendnode
 ### main-api route groups are stubbed
 The following route groups currently route to a stub handler returning `{status:"ok"}` via [stubs.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/stubs.ts), as wired in [routes.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routes.ts):
 - `/api/v1/proofs/*` and `/api/v1/proofs`
-- `/api/v1/verifiers`
 - `/api/v1/escrow`
 - `/api/v1/governance`
 - `/api/v1/verifications`
-- `/api/v1/identity/verifications`
 - `/api/v1/search`
 - `/admin/bridge`
 - `/admin/institutions`
 
 ### main-api endpoints that exist but are placeholders
 - `GET /api/v1/credentials/:credentialId/proof` — returns `{status:"ok"}` (no proof generation)
-- Docs endpoints (`/openapi*`, `/swagger*`) return empty specs in [main-api/server.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/server.ts)
 - `POST /api/v1/fiat/payments/reconcile` — returns `{status:"ok"}` (no Stripe reconciliation logic)
-- `POST /api/v1/institution/identity/attestations` — returns `{status:"ok"}` (no persistence / validation)
 - `GET /health/redis` — always ok (no Redis check)
 
 ### identity-orchestrator “async run” is not implemented
@@ -173,10 +197,11 @@ This section is anchored to the required scope described in [NODE_MONOREPO_IMPLE
 ### 1) Main API: implement missing routers/endpoints
 High-level missing domains (currently stubbed or absent):
 - **Proofs**: real proof generation and verification workflows (replaces `/api/v1/proofs*` stubs).
-- **Verifiers**: CRUD/search, stats, and any role-based restrictions.
+- **Verifiers**: basic CRUD/search is implemented; remaining scope includes stats, institution/admin controls, and any approval/reputation semantics.
 - **Escrow**: create/release/dispute/status with correct state transitions.
 - **Governance**: proposals + voting + listing, admin controls.
-- **Verifications & Identity Verifications**: request/complete/status, audit trail, institutional attestations, listing/getting.
+- **Verifications**: `/api/v1/verifications` domain is still stubbed (separate from identity verification flow).
+- **Identity Verifications**: user/admin/institution flows are implemented; remaining scope includes integration with identity gateway/orchestrator, async processing, and stronger state-machine semantics.
 - **Search**: implement whatever search behavior is required (likely credentials/verifiers/identity records).
 - **Admin surface**: `/admin/bridge`, `/admin/institutions` (institution management, API keys, members).
 
@@ -193,7 +218,7 @@ Practical implementation steps:
 - **2FA backup codes lifecycle**: backup codes are checked but not consumed/invalidated when used.
 - **Credential proofs**: implement `GET /api/v1/credentials/:credentialId/proof` and the `/api/v1/proofs*` domain.
 - **Fiat payments**: Stripe integration, reconciliation, and webhook/polling as required by your spec.
-- **OpenAPI/Swagger**: generate/serve real specs instead of placeholders.
+- **OpenAPI/Swagger**: implemented as a hand-maintained OpenAPI JSON spec + Swagger UI (`/openapi.json`, `/docs`); remaining scope is to generate from code to reduce drift.
 - **Redis health**: implement actual Redis connectivity checks if Redis is a real dependency.
 
 ### 3) Identity subsystem: complete orchestrator semantics
@@ -224,13 +249,16 @@ There are workspace scripts for `lint`, `typecheck`, and `test` (see [package.js
 - **JWT verification**: HMAC SHA-256 with timing-safe signature comparison
 - **Institution access**: API keys hashed and checked against DB + institution status checks
 - **DID request verification (partial)**: used by fiat payment initiation endpoint
+- **Baseline security headers (main-api)**: `x-content-type-options`, `x-frame-options`, `referrer-policy`, `permissions-policy`, conditional HSTS (behind HTTPS), and `x-powered-by` disabled
+- **Data minimization for institution reads**: institution consent-credential endpoint never returns encrypted credential payloads and is gated on active consent
+- **Privileged completion of identity decisions**: user cannot self-complete identity verification; completion is admin-only and attestation is institution-only with consent
 
 ### High-risk gaps (should be addressed before production)
 - **Orchestrator internal endpoints lack authentication/authorization** (gateway passthrough does not enforce anything).
 - **Password reset flow has no delivery channel** (tokens can be created but users cannot complete flow in practice).
 - **Backup codes are not consumed** when used; a stolen code remains reusable until rotated/reset.
-- **No standard security headers** (e.g., `helmet`) and no explicit TLS termination guidance inside the apps (assumed external).
-- **Docs/spec endpoints are placeholders**, increasing mismatch risk between clients and server behavior.
+- **TLS termination + edge headers are assumed external**: the apps do not enforce HTTPS themselves (expected at load balancer/ingress).
+- **OpenAPI spec is not generated from code**: the current spec is hand-maintained, so drift risk still exists.
 - **Async identity run is a stub**: idempotency table exists but no worker executes queued jobs.
 
 ### Compliance-readiness notes (what exists vs what auditors usually expect)
@@ -242,6 +270,7 @@ There are workspace scripts for `lint`, `typecheck`, and `test` (see [package.js
 - Core user/session/auth tables exist in [0002_app_core.sql](file:///c:/Users/User/Desktop/verzabackendnode/packages/db/migrations/main/0002_app_core.sql)
 - Institutions, API keys, consents, and audit events exist in [0005_institutions_consents.sql](file:///c:/Users/User/Desktop/verzabackendnode/packages/db/migrations/main/0005_institutions_consents.sql)
 - Identity verification tables exist in [0003_identity_verifications.sql](file:///c:/Users/User/Desktop/verzabackendnode/packages/db/migrations/main/0003_identity_verifications.sql)
+- Enterprise domains (verifiers/proofs/escrow/governance) exist in [0007_enterprise_domains.sql](file:///c:/Users/User/Desktop/verzabackendnode/packages/db/migrations/main/0007_enterprise_domains.sql)
 - Identity platform (v2) minimal schema exists in [0001_identity_platform.sql](file:///c:/Users/User/Desktop/verzabackendnode/packages/db/migrations/identity/0001_identity_platform.sql)
 
 ## How To Run (Current State)
