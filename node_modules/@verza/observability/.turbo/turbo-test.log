@@ -1,0 +1,4 @@
+
+> test
+> node -e "process.exit(0)"
+

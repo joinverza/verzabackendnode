@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verza Architecture Diagram</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-color: #f4f7f6;
+            --render-bg: #eef2ff;
+            --render-border: #c7d2fe;
+            --service-bg: #ffffff;
+            --service-border: #e5e7eb;
+            --text-main: #1f2937;
+            --text-muted: #6b7280;
+            --line-color: #9ca3af;
+            --go-color: #00add8;
+            --py-color: #ffd43b;
+            --db-color: #336791;
+            --docker-color: #2496ed;
+            --aws-color: #ff9900;
+        }
+
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 40px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .diagram-container {
+            position: relative;
+            max-width: 1400px;
+            width: 100%;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 40px;
+            padding: 20px;
+        }
+
+        /* Generic Box Styles */
+        .box {
+            background: var(--service-bg);
+            border: 1px solid var(--service-border);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            position: relative;
+            z-index: 2;
+            transition: transform 0.2s;
+        }
+
+        .box:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+
+        .title {
+            font-weight: 700;
+            margin-bottom: 8px;
+            font-size: 1.1rem;
+        }
+
+        .subtitle {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+
+        .tech-stack {
+            display: flex;
+            gap: 10px;
+            margin-top: auto;
+            font-size: 1.2rem;
+        }
+
+        .icon-main {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+            color: #4b5563;
+        }
+
+        /* Specific Areas */
+        .users-area {
+            grid-column: 1 / -1;
+            display: flex;
+            justify-content: center;
+            gap: 80px;
+            margin-bottom: 40px;
+        }
+
+        .render-cloud {
+            grid-column: 1 / 4;
+            background-color: var(--render-bg);
+            border: 2px dashed var(--render-border);
+            border-radius: 20px;
+            padding: 40px;
+            position: relative;
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 40px;
+        }
+
+        .render-label {
+            position: absolute;
+            top: -15px;
+            left: 40px;
+            background: var(--render-bg);
+            padding: 0 10px;
+            font-weight: 800;
+            color: #4338ca;
+            font-size: 1.2rem;
+            border: 2px dashed var(--render-border);
+            border-radius: 8px;
+        }
+
+        .external-services {
+            grid-column: 4 / 5;
+            display: flex;
+            flex-direction: column;
+            gap: 40px;
+            justify-content: center;
+        }
+
+        /* Services within Render */
+        .svc-backend { grid-column: 1 / 2; border-top: 4px solid var(--go-color); }
+        .svc-gateway { grid-column: 2 / 3; border-top: 4px solid var(--go-color); }
+        .svc-orchestrator { grid-column: 2 / 3; border-top: 4px solid var(--go-color); }
+        .svc-inference { grid-column: 2 / 3; border-top: 4px solid var(--py-color); }
+        
+        .db-main { grid-column: 1 / 2; border-top: 4px solid var(--db-color); }
+        .db-identity { grid-column: 2 / 3; border-top: 4px solid var(--db-color); }
+
+        /* External Boxes */
+        .ext-box {
+            border-left: 4px solid #6b7280;
+        }
+
+        /* SVG Connectors Layer */
+        .connections {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        /* Tech colors */
+        .fa-golang { color: var(--go-color); }
+        .fa-python { color: var(--py-color); }
+        .fa-docker { color: var(--docker-color); }
+        .fa-database { color: var(--db-color); }
+        .fa-aws { color: var(--aws-color); }
+
+        /* Badge */
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .badge-public { background-color: #d1fae5; color: #065f46; }
+        .badge-private { background-color: #fee2e2; color: #991b1b; }
+
+    </style>
+</head>
+<body>
+
+    <div class="diagram-container">
+        
+        <!-- Users Layer -->
+        <div class="users-area">
+            <div class="box" style="width: 200px;">
+                <i class="fa-solid fa-users icon-main"></i>
+                <div class="title">End Users</div>
+                <div class="subtitle">Mobile App / Web</div>
+            </div>
+            <div class="box" style="width: 200px;">
+                <i class="fa-solid fa-building-columns icon-main"></i>
+                <div class="title">Institutions</div>
+                <div class="subtitle">Partner Backends</div>
+            </div>
+            <div class="box" style="width: 200px;">
+                <i class="fa-solid fa-user-shield icon-main"></i>
+                <div class="title">Admins</div>
+                <div class="subtitle">Operations</div>
+            </div>
+        </div>
+
+        <!-- Render Cloud -->
+        <div class="render-cloud">
+            <div class="render-label"><i class="fa-solid fa-cloud"></i> Render Cloud (Production)</div>
+
+            <!-- Main Backend Column -->
+            <div style="display: flex; flex-direction: column; gap: 40px;">
+                <div class="box svc-backend" id="backend">
+                    <span class="badge badge-public" style="position:absolute; top:10px; right:10px;">Public</span>
+                    <i class="fa-solid fa-server icon-main"></i>
+                    <div class="title">verza-backend</div>
+                    <div class="subtitle">Core REST API</div>
+                    <div class="subtitle">Port: 8090</div>
+                    <div class="tech-stack">
+                        <i class="fa-brands fa-golang" title="Go"></i>
+                        <i class="fa-brands fa-docker" title="Docker"></i>
+                    </div>
+                </div>
+
+                <div class="box db-main" id="db-verza">
+                    <span class="badge badge-private" style="position:absolute; top:10px; right:10px;">Private</span>
+                    <i class="fa-solid fa-database icon-main"></i>
+                    <div class="title">verza-db</div>
+                    <div class="subtitle">PostgreSQL 16</div>
+                    <div class="subtitle">Users, Auth, Tx Data</div>
+                </div>
+            </div>
+
+            <!-- Identity Platform Column -->
+            <div style="display: flex; flex-direction: column; gap: 30px;">
+                <div class="box svc-gateway" id="gateway">
+                    <span class="badge badge-public" style="position:absolute; top:10px; right:10px;">Public</span>
+                    <i class="fa-solid fa-id-card icon-main"></i>
+                    <div class="title">verza-identity-gateway</div>
+                    <div class="subtitle">Edge API for Identity</div>
+                    <div class="subtitle">Port: 8088</div>
+                    <div class="tech-stack">
+                        <i class="fa-brands fa-golang" title="Go"></i>
+                        <i class="fa-brands fa-docker" title="Docker"></i>
+                    </div>
+                </div>
+
+                <div class="box svc-orchestrator" id="orchestrator">
+                    <span class="badge badge-private" style="position:absolute; top:10px; right:10px;">Private</span>
+                    <i class="fa-solid fa-gears icon-main"></i>
+                    <div class="title">verza-identity-orchestrator</div>
+                    <div class="subtitle">Workflow Engine & Workers</div>
+                    <div class="subtitle">Port: 8089</div>
+                    <div class="tech-stack">
+                        <i class="fa-brands fa-golang" title="Go"></i>
+                        <i class="fa-brands fa-docker" title="Docker"></i>
+                    </div>
+                </div>
+
+                <div class="box svc-inference" id="inference">
+                    <span class="badge badge-private" style="position:absolute; top:10px; right:10px;">Private</span>
+                    <i class="fa-solid fa-brain icon-main"></i>
+                    <div class="title">verza-inference</div>
+                    <div class="subtitle">ML/CV Analysis</div>
+                    <div class="subtitle">Port: 8090</div>
+                    <div class="tech-stack">
+                        <i class="fa-brands fa-python" title="Python"></i>
+                        <i class="fa-brands fa-docker" title="Docker"></i>
+                    </div>
+                </div>
+
+                <div class="box db-identity" id="db-identity">
+                    <span class="badge badge-private" style="position:absolute; top:10px; right:10px;">Private</span>
+                    <i class="fa-solid fa-database icon-main"></i>
+                    <div class="title">verza-identity-db</div>
+                    <div class="subtitle">PostgreSQL 16</div>
+                    <div class="subtitle">Identity State, Audit Logs</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- External Services -->
+        <div class="external-services">
+            <div class="box ext-box" id="ext-stripe">
+                <i class="fa-brands fa-stripe icon-main" style="color: #635bff;"></i>
+                <div class="title">Stripe</div>
+                <div class="subtitle">Fiat Payments</div>
+            </div>
+            
+            <div class="box ext-box" id="ext-blockchain">
+                <i class="fa-brands fa-ethereum icon-main" style="color: #627eea;"></i>
+                <div class="title">Blockchain Networks</div>
+                <div class="subtitle">EVM / Cardano / Midnight</div>
+            </div>
+
+            <div class="box ext-box" id="ext-s3">
+                <i class="fa-brands fa-aws icon-main" style="color: #ff9900;"></i>
+                <div class="title">Object Storage</div>
+                <div class="subtitle">AWS S3 / MinIO</div>
+                <div class="subtitle">Media & Docs</div>
+            </div>
+
+            <div class="box ext-box" id="ext-zk">
+                <i class="fa-solid fa-file-contract icon-main"></i>
+                <div class="title">ZK Verifier</div>
+                <div class="subtitle">Proof Verification</div>
+            </div>
+        </div>
+
+        <!-- SVG Connections -->
+        <svg class="connections">
+            <defs>
+                <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+                    <polygon points="0 0, 10 3.5, 0 7" fill="#9ca3af" />
+                </marker>
+            </defs>
+            <!-- Note: In a static HTML without JS calculation, perfect lines are hard. 
+                 These are illustrative paths assuming standard desktop resolution. 
+                 For a truly dynamic diagram, JS would be needed to compute coordinates.
+                 I will use CSS borders/pseudo-elements for internal structure mostly, 
+                 but here is a conceptual overlay if needed.
+            -->
+        </svg>
+
+    </div>
+
+    <!-- Script to draw simple lines between elements -->
+    <script>
+        function connect(startId, endId, color, dashed = false) {
+            const start = document.getElementById(startId);
+            const end = document.getElementById(endId);
+            const svg = document.querySelector('.connections');
+
+            if (!start || !end) return;
+
+            const startRect = start.getBoundingClientRect();
+            const endRect = end.getBoundingClientRect();
+            const containerRect = document.querySelector('.diagram-container').getBoundingClientRect();
+
+            // Calculate centers relative to container
+            const x1 = startRect.left + startRect.width / 2 - containerRect.left;
+            const y1 = startRect.top + startRect.height / 2 - containerRect.top;
+            const x2 = endRect.left + endRect.width / 2 - containerRect.left;
+            const y2 = endRect.top + endRect.height / 2 - containerRect.top;
+
+            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            
+            // Simple logic for elbow connectors
+            let d = "";
+            
+            // If vertically aligned (approx)
+            if (Math.abs(x1 - x2) < 50) {
+                d = `M ${x1} ${y1 + startRect.height/2} L ${x2} ${y2 - endRect.height/2}`;
+            } 
+            // If side by side
+            else if (Math.abs(y1 - y2) < 50) {
+                 d = `M ${x1 + startRect.width/2} ${y1} L ${x2 - endRect.width/2} ${y2}`;
+            }
+            // Elbow
+            else {
+                const midY = (y1 + y2) / 2;
+                // exit bottom of start
+                d = `M ${x1} ${y1 + startRect.height/2} 
+                     V ${midY} 
+                     H ${x2} 
+                     V ${y2 - endRect.height/2}`;
+                
+                // If target is to the right (External services)
+                if (x2 > x1 + 200) {
+                     d = `M ${x1 + startRect.width/2} ${y1} 
+                          H ${x2 - 20} 
+                          L ${x2 - endRect.width/2} ${y2}`;
+                }
+            }
+
+            path.setAttribute("d", d);
+            path.setAttribute("stroke", color || "#9ca3af");
+            path.setAttribute("stroke-width", "2");
+            path.setAttribute("fill", "none");
+            path.setAttribute("marker-end", "url(#arrowhead)");
+            if (dashed) path.setAttribute("stroke-dasharray", "5,5");
+
+            svg.appendChild(path);
+        }
+
+        window.onload = function() {
+            // Internal Render connections
+            connect('backend', 'db-verza');
+            connect('gateway', 'orchestrator');
+            connect('orchestrator', 'inference');
+            connect('orchestrator', 'db-identity');
+            
+            // Cross-service internal
+            connect('backend', 'inference', '#ccc', true); // optional path
+
+            // External connections
+            connect('backend', 'ext-stripe');
+            connect('backend', 'ext-blockchain');
+            connect('gateway', 'ext-s3');
+            connect('orchestrator', 'ext-s3');
+        };
+        
+        window.onresize = function() {
+            document.querySelector('.connections').innerHTML = `
+            <defs>
+                <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+                    <polygon points="0 0, 10 3.5, 0 7" fill="#9ca3af" />
+                </marker>
+            </defs>`;
+            window.onload();
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+{
+  "name": "verza-backend",
+  "private": true,
+  "packageManager": "npm@11.6.4",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "db:migrate:main": "node packages/db/dist/cli.js migrate --db=main",
+    "db:migrate:identity": "node packages/db/dist/cli.js migrate --db=identity"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@types/node": "^20.19.30",
+    "eslint": "^9.18.0",
+    "globals": "^15.13.0",
+    "turbo": "^2.4.0",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.20.0"
+  }
+}

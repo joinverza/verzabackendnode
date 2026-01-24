@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verza Deployment Specifications</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary: #0f172a;
+            --secondary: #334155;
+            --accent: #0ea5e9;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --border: #e2e8f0;
+            --text: #1e293b;
+            --text-light: #64748b;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            margin: 0;
+            padding: 40px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1, h2, h3 { color: var(--primary); }
+        h1 { font-size: 2.5rem; margin-bottom: 10px; border-bottom: 3px solid var(--accent); display: inline-block; padding-bottom: 10px; }
+        h2 { font-size: 1.8rem; margin-top: 50px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+        
+        .card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+            padding: 30px;
+            margin-bottom: 30px;
+            border: 1px solid var(--border);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 12px 15px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background-color: #f1f5f9;
+            font-weight: 600;
+            color: var(--secondary);
+        }
+
+        tr:hover { background-color: #f8fafc; }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .badge-go { background: #e0f2fe; color: #0284c7; }
+        .badge-py { background: #fef3c7; color: #d97706; }
+        .badge-db { background: #dbeafe; color: #1e40af; }
+        .badge-redis { background: #fee2e2; color: #dc2626; }
+
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+
+        .topology-box {
+            background: #f8fafc;
+            border: 2px dashed #cbd5e1;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+
+        .icon-box {
+            font-size: 1.5rem;
+            color: var(--accent);
+            margin-right: 10px;
+        }
+
+        .aws-color { color: #ff9900; }
+        .render-color { color: #4338ca; }
+
+        .spec-list li { margin-bottom: 8px; }
+
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <h1>Verza Deployment Specifications</h1>
+            <p style="font-size: 1.2rem; color: var(--text-light);">Detailed resource requirements, instance sizing, and topology guide for production deployment.</p>
+        </header>
+
+        <!-- Section 1: Resource Inventory -->
+        <section>
+            <h2><i class="fa-solid fa-server icon-box"></i> Component Inventory & Resource Sizing</h2>
+            <div class="card">
+                <p>To run the full Verza infrastructure efficiently, the following components are required. "Prod Instances" assumes a high-availability (HA) setup.</p>
+                
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Component Name</th>
+                            <th>Type</th>
+                            <th>Rec. Resources (CPU / RAM)</th>
+                            <th>Dev Instances</th>
+                            <th>Prod Instances</th>
+                            <th>Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>verza-backend</strong></td>
+                            <td><span class="badge badge-go">Go Service</span></td>
+                            <td>1 vCPU / 512MB RAM</td>
+                            <td>1</td>
+                            <td>2+ (Autoscale)</td>
+                            <td>Core Monolith. CPU bound on crypto ops.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>verza-identity-gateway</strong></td>
+                            <td><span class="badge badge-go">Go Service</span></td>
+                            <td>0.5 vCPU / 256MB RAM</td>
+                            <td>1</td>
+                            <td>2+ (Autoscale)</td>
+                            <td>Edge Proxy. High network throughput.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>verza-orchestrator</strong></td>
+                            <td><span class="badge badge-go">Go Worker</span></td>
+                            <td>1 vCPU / 1GB RAM</td>
+                            <td>1</td>
+                            <td>2+</td>
+                            <td>State machine. Memory intensive for queues.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>verza-inference</strong></td>
+                            <td><span class="badge badge-py">Python ML</span></td>
+                            <td>2 vCPU / 4GB RAM</td>
+                            <td>1</td>
+                            <td>2-4 (GPU opt.)</td>
+                            <td>Heavy compute. Use GPU instances if QPS > 10.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>verza-db (Core)</strong></td>
+                            <td><span class="badge badge-db">PostgreSQL 16</span></td>
+                            <td>2 vCPU / 4GB RAM</td>
+                            <td>1</td>
+                            <td>1 (Primary + Replica)</td>
+                            <td>Transactional data. High IOPS required.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>verza-identity-db</strong></td>
+                            <td><span class="badge badge-db">PostgreSQL 16</span></td>
+                            <td>2 vCPU / 4GB RAM</td>
+                            <td>1</td>
+                            <td>1 (Primary + Replica)</td>
+                            <td>Session/Audit logs. High write volume.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Redis (Optional)</strong></td>
+                            <td><span class="badge badge-redis">Redis 7</span></td>
+                            <td>1 vCPU / 1GB RAM</td>
+                            <td>0 (In-mem)</td>
+                            <td>1 Cluster</td>
+                            <td>For shared job queues/cache if scaling > 2 replicas.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Section 2: Deployment Strategies -->
+        <section>
+            <h2><i class="fa-solid fa-layer-group icon-box"></i> Deployment Topologies</h2>
+            <p>Below are the two recommended paths for deploying the Verza ecosystem.</p>
+
+            <div class="comparison-grid">
+                
+                <!-- RENDER DEPLOYMENT -->
+                <div class="card">
+                    <h3 class="render-color"><i class="fa-solid fa-cloud"></i> Render (PaaS)</h3>
+                    <p><strong>Best for:</strong> Speed, Simplicity, Low DevOps Overhead.</p>
+                    
+                    <div class="topology-box">
+                        <strong>Configuration Strategy:</strong>
+                        <ul class="spec-list">
+                            <li><strong>Blueprints:</strong> Use `render.yaml` (Infrastructure as Code).</li>
+                            <li><strong>Networking:</strong> All services in the same region communicate via private network automatically.</li>
+                            <li><strong>Databases:</strong> Use Managed PostgreSQL instances.</li>
+                        </ul>
+                    </div>
+
+                    <h4>Instance Mapping</h4>
+                    <ul>
+                        <li><strong>Backend & Gateway:</strong> `Standard` Tier (Autoscale enabled).</li>
+                        <li><strong>Orchestrator:</strong> `Standard` or `Pro` (Background Worker).</li>
+                        <li><strong>Inference:</strong> `Pro Plus` or custom GPU instance (if available/needed).</li>
+                        <li><strong>DBs:</strong> `Pro` Plan (for backups/HA).</li>
+                    </ul>
+
+                    <h4>Pros & Cons</h4>
+                    <ul class="spec-list">
+                        <li><i class="fa-solid fa-check" style="color:green"></i> Zero-downtime deploys built-in.</li>
+                        <li><i class="fa-solid fa-check" style="color:green"></i> Built-in DDoS protection.</li>
+                        <li><i class="fa-solid fa-xmark" style="color:red"></i> Higher cost at massive scale.</li>
+                        <li><i class="fa-solid fa-xmark" style="color:red"></i> Less granular network control (VPC).</li>
+                    </ul>
+                </div>
+
+                <!-- AWS DEPLOYMENT -->
+                <div class="card">
+                    <h3 class="aws-color"><i class="fa-brands fa-aws"></i> AWS (IaaS)</h3>
+                    <p><strong>Best for:</strong> Enterprise Compliance, Max Scale, Fine-grained Control.</p>
+
+                    <div class="topology-box">
+                        <strong>Configuration Strategy:</strong>
+                        <ul class="spec-list">
+                            <li><strong>Compute:</strong> Amazon ECS (Fargate) or EKS (Kubernetes).</li>
+                            <li><strong>Database:</strong> Amazon RDS for PostgreSQL (Multi-AZ).</li>
+                            <li><strong>Storage:</strong> S3 Buckets (Encrypted).</li>
+                            <li><strong>Networking:</strong> VPC with Public/Private Subnets + ALB.</li>
+                        </ul>
+                    </div>
+
+                    <h4>Instance Mapping</h4>
+                    <ul>
+                        <li><strong>Backend/Gateway:</strong> `t3.medium` or `c6a.large` (Fargate).</li>
+                        <li><strong>Inference:</strong> `g4dn.xlarge` (GPU) or `c6i.2xlarge`.</li>
+                        <li><strong>DBs:</strong> `db.m6g.large` (RDS Multi-AZ).</li>
+                        <li><strong>Redis:</strong> ElastiCache `cache.t4g.medium`.</li>
+                    </ul>
+
+                    <h4>Pros & Cons</h4>
+                    <ul class="spec-list">
+                        <li><i class="fa-solid fa-check" style="color:green"></i> Full VPC Isolation (Security).</li>
+                        <li><i class="fa-solid fa-check" style="color:green"></i> Cost-efficient at scale (Reserved Instances).</li>
+                        <li><i class="fa-solid fa-xmark" style="color:red"></i> High DevOps maintenance.</li>
+                        <li><i class="fa-solid fa-xmark" style="color:red"></i> Complex initial setup (IAM, SG, VPC).</li>
+                    </ul>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- Section 3: Environment Variables -->
+        <section>
+            <h2><i class="fa-solid fa-key icon-box"></i> Critical Environment Configuration</h2>
+            <div class="card">
+                <p>Regardless of the platform, these secrets must be injected into the environment:</p>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <div>
+                        <h4>Security & Auth</h4>
+                        <ul>
+                            <li><code>JWT_SECRET</code> / <code>JWT_ISSUER</code></li>
+                            <li><code>DATA_ENCRYPTION_KEY</code> (Base64 32-byte)</li>
+                            <li><code>DID_SESSION_SECRET</code></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>Integrations</h4>
+                        <ul>
+                            <li><code>STRIPE_SECRET_KEY</code></li>
+                            <li><code>EVM_RPC_URL</code> / <code>MIDNIGHT_NODE_URL</code></li>
+                            <li><code>AWS_ACCESS_KEY_ID</code> (for S3)</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </div>
+</body>
+</html>

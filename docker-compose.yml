@@ -1,0 +1,107 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: verza
+      POSTGRES_PASSWORD: verza
+      POSTGRES_DB: verza
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U verza -d verza"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  postgres-identity:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: verza
+      POSTGRES_PASSWORD: verza
+      POSTGRES_DB: verza_identity
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U verza -d verza_identity"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+  minio:
+    image: quay.io/minio/minio:latest
+    command: server --console-address ":9001" /data
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio12345
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+  inference:
+    build:
+      context: ./apps/inference
+    ports:
+      - "8087:8087"
+  identity-orchestrator:
+    build:
+      context: .
+      dockerfile: ./apps/identity-orchestrator/Dockerfile
+    environment:
+      PORT: "8089"
+      IDENTITY_DATABASE_URL: postgres://verza:verza@postgres-identity:5432/verza_identity
+      REDIS_URL: redis://redis:6379
+      INFERENCE_URL: http://inference:8087
+      METRICS_ENABLED: "1"
+      LOG_LEVEL: info
+    depends_on:
+      postgres-identity:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      inference:
+        condition: service_started
+    ports:
+      - "8089:8089"
+  identity-gateway:
+    build:
+      context: .
+      dockerfile: ./apps/identity-gateway/Dockerfile
+    environment:
+      PORT: "8088"
+      ORCHESTRATOR_URL: http://identity-orchestrator:8089
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY_ID: minio
+      S3_SECRET_ACCESS_KEY: minio12345
+      S3_BUCKET: verza-uploads
+      S3_REGION: us-east-1
+      S3_FORCE_PATH_STYLE: "1"
+      METRICS_ENABLED: "1"
+      LOG_LEVEL: info
+    depends_on:
+      minio:
+        condition: service_started
+      identity-orchestrator:
+        condition: service_started
+    ports:
+      - "8088:8088"
+  main-api:
+    build:
+      context: .
+      dockerfile: ./apps/main-api/Dockerfile
+    environment:
+      PORT: "8090"
+      DATABASE_URL: postgres://verza:verza@postgres:5432/verza
+      JWT_SECRET: dev_jwt_secret_change_me
+      JWT_ISSUER: verza
+      REFRESH_TOKEN_TTL_SECONDS: "2592000"
+      ACCESS_TOKEN_TTL_SECONDS: "900"
+      METRICS_ENABLED: "0"
+      LOG_LEVEL: info
+      ENCRYPTION_MASTER_KEY_B64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      RECEIPT_ED25519_SEED_B64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8090:8090"

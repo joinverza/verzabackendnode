@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Verza – Infrastructure & Deployment Architecture</title>
+    <style>
+      :root {
+        --bg: #0b1020;
+        --panel: #0f1630;
+        --text: #e9ecf5;
+        --muted: #b9c0d8;
+        --border: rgba(255, 255, 255, 0.12);
+        --accent: #7aa2ff;
+        --chip: rgba(122, 162, 255, 0.14);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+        background: radial-gradient(1200px 600px at 20% 0%, rgba(122, 162, 255, 0.22), transparent 60%),
+          radial-gradient(1200px 600px at 80% 10%, rgba(94, 234, 212, 0.12), transparent 60%),
+          var(--bg);
+        color: var(--text);
+      }
+
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        backdrop-filter: blur(12px);
+        background: rgba(11, 16, 32, 0.7);
+        border-bottom: 1px solid var(--border);
+      }
+
+      .wrap {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 18px 16px;
+      }
+
+      h1 {
+        font-size: 22px;
+        margin: 0 0 8px 0;
+        letter-spacing: 0.2px;
+      }
+
+      .sub {
+        color: var(--muted);
+        font-size: 13px;
+        margin: 0;
+        line-height: 1.5;
+      }
+
+      nav {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 12px;
+      }
+
+      nav a {
+        text-decoration: none;
+        color: var(--text);
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.04);
+        border-radius: 10px;
+        font-size: 13px;
+      }
+
+      nav a:hover { border-color: rgba(122, 162, 255, 0.55); }
+
+      main .wrap { padding-top: 20px; padding-bottom: 48px; }
+
+      section {
+        background: rgba(15, 22, 48, 0.55);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 16px;
+        margin: 16px 0;
+      }
+
+      section h2 {
+        font-size: 16px;
+        margin: 0 0 10px 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .badge {
+        font-size: 12px;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: var(--chip);
+        border: 1px solid rgba(122, 162, 255, 0.35);
+        color: var(--text);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+
+      @media (min-width: 980px) {
+        .grid.two { grid-template-columns: 1fr 1fr; }
+      }
+
+      .note {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.6;
+        margin: 0 0 10px 0;
+      }
+
+      .legend {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        font-size: 13px;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+
+      .legend code {
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.06);
+        padding: 2px 6px;
+        border-radius: 7px;
+        border: 1px solid var(--border);
+      }
+
+      .mermaid {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 10px;
+        overflow: auto;
+      }
+
+      .footer {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.6;
+      }
+
+      @media print {
+        header { position: static; background: #fff; color: #000; border: none; }
+        body { background: #fff; color: #000; }
+        section { border: 1px solid #ddd; background: #fff; }
+        .mermaid { border: 1px solid #ddd; background: #fff; }
+        nav { display: none; }
+        .badge { border: 1px solid #aaa; background: #f3f3f3; color: #000; }
+      }
+    </style>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+
+      mermaid.initialize({
+        startOnLoad: true,
+        theme: "dark",
+        flowchart: { curve: "basis" }
+      });
+    </script>
+  </head>
+  <body>
+    <header>
+      <div class="wrap">
+        <h1>Verza – Infrastructure & Deployment Architecture</h1>
+        <p class="sub">
+          Full end-to-end infrastructure view (services, data stores, integrations, and deployment topology).
+          This page renders diagrams locally in a browser and can be shared as a single file.
+        </p>
+        <nav>
+          <a href="#deployment">Deployment (Render)</a>
+          <a href="#system-context">System Context</a>
+          <a href="#identity-platform">Identity Platform</a>
+          <a href="#backend-internals">Backend Internals</a>
+          <a href="#contracts">Smart Contracts</a>
+          <a href="#legend">Legend</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <div class="wrap">
+        <section id="deployment">
+          <h2>Production Deployment Topology <span class="badge">Render + Managed Postgres</span></h2>
+          <p class="note">
+            Public services are internet-facing. Private services are internal-only service-to-service. Databases are Render managed Postgres instances.
+          </p>
+          <div class="mermaid">
+flowchart TB
+  subgraph USERS["Users / Clients"]
+    WEB[Web/Mobile App]:::actor
+    PARTNER[Institution Backend]:::actor
+    ADMIN[Admin Operators]:::actor
+  end
+
+  subgraph RENDER["Render Cloud (Production)"]
+    subgraph EDGE["Render Edge (TLS termination + routing)"]
+      INGRESS[Public HTTPS Endpoints]:::edge
+    end
+
+    subgraph PUBLICSVC["Public Services (web)"]
+      VAPI["verza-backend (Go)\nPORT 8090\n/health"]:::svc
+      IGW["verza-identity-gateway (Go)\nPORT 8088\n/healthz"]:::svc
+    end
+
+    subgraph PRIVSVC["Private Services (pserv)"]
+      IORCH["verza-identity-orchestrator (Go)\nPORT 8089\n/healthz"]:::svc
+      INF["verza-inference (Python/FastAPI)\nPORT 8090\n/healthz"]:::svc
+    end
+
+    subgraph DATA["Managed Data"]
+      VDB[(Render Postgres: verza-db)]:::db
+      IDB[(Render Postgres: verza-identity-db)]:::db
+    end
+
+    SECRETS["Secret Env Vars\nJWT_SECRET, DATA_ENCRYPTION_KEY_B64,\nRECEIPT_ED25519_SEED_B64, SECRETS_B64,\nS3 credentials (optional)"]:::sec
+  end
+
+  subgraph EXTERNAL["External Dependencies"]
+    STRIPE[Stripe API]:::ext
+    ZKV[ZK Verifier Service (HTTP)]:::ext
+    EVM[EVM RPC Provider]:::ext
+    CARD[Cardano Provider]:::ext
+    MID[Midnight Network]:::ext
+    S3[(S3 Object Store\nAWS S3 / MinIO)]:::store
+  end
+
+  WEB -->|HTTPS| INGRESS
+  PARTNER -->|HTTPS| INGRESS
+  ADMIN -->|HTTPS| INGRESS
+
+  INGRESS --> VAPI
+  INGRESS --> IGW
+
+  VAPI -->|DATABASE_URL| VDB
+  IORCH -->|POSTGRES_URL| IDB
+
+  IGW -->|ORCHESTRATOR_URL\ninternal DNS| IORCH
+  IORCH -->|INFERENCE_URL\ninternal DNS| INF
+
+  IGW -->|Pre-signed upload| S3
+  IORCH -->|Read media| S3
+
+  VAPI -->|REST| STRIPE
+  VAPI -->|HTTP| ZKV
+  VAPI -->|RPC/HTTP| EVM
+  VAPI -->|HTTP| CARD
+  VAPI -->|HTTP| MID
+
+  SECRETS -.-> VAPI
+  SECRETS -.-> IGW
+  SECRETS -.-> IORCH
+
+  classDef actor fill:#ffffff,stroke:#111,stroke-width:1px,color:#111;
+  classDef edge fill:#f0f0ff,stroke:#4b4bb8,stroke-width:1px,color:#111;
+  classDef svc fill:#e8f0ff,stroke:#2b5fd9,stroke-width:1px,color:#111;
+  classDef db fill:#eaffea,stroke:#1f7a1f,stroke-width:1px,color:#111;
+  classDef store fill:#fff3e0,stroke:#b26a00,stroke-width:1px,color:#111;
+  classDef ext fill:#f6f6f6,stroke:#666,stroke-width:1px,color:#111;
+  classDef sec fill:#fff3e0,stroke:#b26a00,stroke-dasharray: 5 5,stroke-width:1px,color:#111;
+          </div>
+        </section>
+
+        <section id="system-context">
+          <h2>System Context <span class="badge">Who talks to what</span></h2>
+          <p class="note">
+            This view is the full platform boundary: end-user flows, institution access, identity subsystem, and external networks/providers.
+          </p>
+          <div class="mermaid">
+flowchart LR
+  EU[End User\n(Mobile/Web App)]:::actor
+  INST[Institution Client\n(Partner Backend)]:::actor
+  OPS[Admin Operator]:::actor
+
+  subgraph VERZA["Verza Platform"]
+    VAPI["verza-backend (Go)\nMain REST API\n:8090"]:::svc
+    IGW["verza-identity-gateway (Go)\nIdentity Edge API\n:8088"]:::svc
+    IORCH["verza-identity-orchestrator (Go)\nWorkflows + Jobs\n:8089"]:::svc
+    INF["verza-inference (Python/FastAPI)\nInference HTTP\n:8090"]:::svc
+    VDB[(Postgres: verza-db)]:::db
+    IDB[(Postgres: verza-identity-db)]:::db
+    OBJ[(S3-Compatible Object Storage)]:::store
+  end
+
+  STRIPE[Stripe API]:::ext
+  ZKV[ZK Verifier Service\n(HTTP)]:::ext
+  EVM[EVM RPC Provider]:::ext
+  CARD[Cardano Provider]:::ext
+  MID[Midnight Network]:::ext
+  IPFS[IPFS Gateway/Pinning]:::ext
+
+  EU -->|HTTPS + JWT| VAPI
+  INST -->|HTTPS + API Key| VAPI
+  OPS -->|HTTPS + JWT (admin)| VAPI
+
+  EU -->|HTTPS + Bearer Token| IGW
+  IGW -->|HTTP (private)| IORCH
+  IGW -->|Pre-signed URL upload| OBJ
+  IORCH -->|Read media| OBJ
+  IORCH -->|HTTP| INF
+  IORCH -->|SQL| IDB
+
+  VAPI -->|SQL| VDB
+  VAPI -->|REST| STRIPE
+  VAPI -->|HTTP| ZKV
+  VAPI -->|RPC/HTTP| EVM
+  VAPI -->|HTTP| CARD
+  VAPI -->|HTTP| MID
+  VAPI -->|HTTP| IPFS
+
+  classDef actor fill:#ffffff,stroke:#111,stroke-width:1px,color:#111;
+  classDef svc fill:#e8f0ff,stroke:#2b5fd9,stroke-width:1px,color:#111;
+  classDef db fill:#eaffea,stroke:#1f7a1f,stroke-width:1px,color:#111;
+  classDef store fill:#fff3e0,stroke:#b26a00,stroke-width:1px,color:#111;
+  classDef ext fill:#f6f6f6,stroke:#666,stroke-width:1px,color:#111;
+          </div>
+        </section>
+
+        <section id="identity-platform">
+          <h2>Identity Platform Workflow <span class="badge">Media + Orchestration + Inference</span></h2>
+          <div class="grid two">
+            <div>
+              <p class="note">
+                The identity gateway handles client-facing session and media operations (including issuing pre-signed upload URLs).
+                The orchestrator runs verification workflows and calls the inference service for analysis.
+              </p>
+              <div class="legend">
+                <div><code>Gateway</code> = edge API (JWT-protected) + pre-signing</div>
+                <div><code>Object Store</code> = document/selfie uploads + derived media outputs</div>
+                <div><code>Orchestrator</code> = workflow engine + job worker + audit trail</div>
+                <div><code>Inference</code> = liveness, document analysis, face match, deepfake detection</div>
+              </div>
+            </div>
+            <div class="footer">
+              <div><strong>Typical steps</strong></div>
+              <div>1) Create session → 2) Pre-sign upload URLs → 3) Upload media → 4) Attach media → 5) Run verification → 6) Read results</div>
+              <div style="margin-top:8px;"><strong>Notes</strong></div>
+              <div>Derived media may be generated server-side (e.g., best selfie frame, document portrait extraction).</div>
+            </div>
+          </div>
+          <div class="mermaid" style="margin-top:12px;">
+sequenceDiagram
+  autonumber
+  participant C as Client (Mobile/Web)
+  participant G as Identity Gateway (:8088)
+  participant S as Object Storage (S3)
+  participant O as Orchestrator (:8089)
+  participant I as Inference (:8090)
+  participant P as Postgres (verza-identity-db)
+
+  C->>G: POST /v1/sessions (Bearer token)
+  G->>P: Create session record
+  P-->>G: session_id
+  G-->>C: session_id + session token
+
+  C->>G: POST /v1/media/presign (kinds: document_front, selfie_video, ...)
+  G-->>C: pre-signed upload URLs
+  C->>S: PUT media objects (pre-signed URLs)
+  S-->>C: 200 OK
+
+  C->>G: POST /v1/verifications (session_id, policy_id, checks)
+  G->>O: Create verification (internal call)
+  O->>P: Persist verification state
+  O-->>G: verification_id
+  G-->>C: verification_id
+
+  C->>G: POST /v1/verifications/{id}/media (attach object keys + hashes)
+  G->>O: Attach media refs
+  O->>P: Persist media refs
+  O-->>G: OK
+  G-->>C: OK
+
+  C->>G: POST /v1/verifications/{id}/run
+  G->>O: Run verification
+  O->>S: Read media objects
+  O->>I: Analyze (liveness/document/face_match/deepfake)
+  I-->>O: Decision + component scores + evidence
+  O->>P: Persist results + audit events
+  O-->>G: Completed status + result
+  G-->>C: Verification result
+          </div>
+        </section>
+
+        <section id="backend-internals">
+          <h2>Main Backend Internals <span class="badge">Go API + Storage + Integrations</span></h2>
+          <p class="note">
+            This is a functional view of the main backend: HTTP routing to domain handlers, database persistence, and external integrations (Stripe, ZK verifier, chains, IPFS, optional inference calls).
+          </p>
+          <div class="mermaid">
+flowchart LR
+  subgraph APP["verza-backend (Go)"]
+    HTTP["HTTP Server + mux\n/api/v1/*, /admin/*"]:::comp
+    MW["Middleware\nCORS, body limits,\nrequest IDs, auth/roles"]:::comp
+
+    subgraph API["Domain Handlers"]
+      AUTH["Auth + Sessions + 2FA"]:::comp
+      USER["Me/Profile + Passwords"]:::comp
+      NOTIF["Notifications"]:::comp
+      SEARCH["Search"]:::comp
+      CREDS["Credentials + Shares + Proofs"]:::comp
+      CONS["Consents"]:::comp
+      INST["Institution API + API keys"]:::comp
+      VERIF["Identity/Liveness Verifications"]:::comp
+      VERIFIERS["Verifiers"]:::comp
+      ESCROW["Escrow"]:::comp
+      GOV["Governance"]:::comp
+      PAY["Fiat Payments"]:::comp
+      BRIDGE["Bridge Admin + Listeners"]:::comp
+      HEALTH["Health Checks"]:::comp
+    end
+
+    STORE["Storage Layer\nPostgres-backed repo\n+ migrations"]:::comp
+
+    subgraph INTEG["Integrations / Clients"]
+      STR["Stripe API Client"]:::ext
+      ZK["ZK Verifier (HTTP)"]:::ext
+      EVM["EVM RPC + Contract ABIs"]:::ext
+      CARD["Cardano Provider"]:::ext
+      MID["Midnight Network"]:::ext
+      IPFS["IPFS Gateway"]:::ext
+      INF["Inference HTTP (optional)\nfor liveness scoring"]:::ext
+    end
+  end
+
+  HTTP --> MW
+  MW --> API
+  API --> STORE
+
+  PAY --> STR
+  CREDS --> ZK
+  VERIFIERS --> EVM
+  ESCROW --> EVM
+  GOV --> EVM
+  BRIDGE --> CARD
+  BRIDGE --> MID
+  CREDS --> IPFS
+  VERIF --> INF
+
+  classDef comp fill:#ffffff,stroke:#444,stroke-width:1px,color:#111;
+  classDef ext fill:#f6f6f6,stroke:#666,stroke-width:1px,color:#111;
+          </div>
+        </section>
+
+        <section id="contracts">
+          <h2>Smart Contracts Deployment & Address Wiring <span class="badge">Hardhat → EVM → Backend</span></h2>
+          <p class="note">
+            Contracts are deployed with Hardhat (UUPS proxies) and addresses are exported into a JSON artifact that the backend can read at startup if env vars are not set.
+          </p>
+          <div class="mermaid">
+flowchart LR
+  DEV[DevOps / CI]:::actor
+  HH[Hardhat Project\nverza-contracts/hardhat]:::svc
+  ETH[(EVM Network\nSepolia/Mainnet)]:::ext
+  DEPJSON["deployed/sepolia.json\n(contract addresses)"]:::store
+  API["verza-backend (Go)\nreads addresses\nif env missing"]:::svc
+
+  DEV -->|npm run deploy:sepolia| HH
+  HH -->|Deploy UUPS proxies| ETH
+  HH -->|Write JSON addresses| DEPJSON
+  DEPJSON -->|Read on startup\n(loadDeployedJSON)| API
+
+  classDef actor fill:#ffffff,stroke:#111,stroke-width:1px,color:#111;
+  classDef svc fill:#e8f0ff,stroke:#2b5fd9,stroke-width:1px,color:#111;
+  classDef store fill:#fff3e0,stroke:#b26a00,stroke-width:1px,color:#111;
+  classDef ext fill:#f6f6f6,stroke:#666,stroke-width:1px,color:#111;
+          </div>
+        </section>
+
+        <section id="legend">
+          <h2>Legend & Key Ports <span class="badge">Quick reference</span></h2>
+          <div class="grid two">
+            <div class="legend">
+              <div><code>Public (web)</code>: internet-facing service with HTTPS ingress.</div>
+              <div><code>Private (pserv)</code>: internal-only service reachable by Render private DNS.</div>
+              <div><code>Managed Postgres</code>: Render hosted database with injected connection strings.</div>
+              <div><code>S3</code>: object storage for identity media (AWS S3 or MinIO in dev).</div>
+              <div><code>Secrets</code>: environment variables marked secret / not synced.</div>
+            </div>
+            <div class="legend">
+              <div><code>verza-backend</code>: 8090, health <code>/health</code>.</div>
+              <div><code>identity-gateway</code>: 8088, health <code>/healthz</code>.</div>
+              <div><code>identity-orchestrator</code>: 8089, health <code>/healthz</code>.</div>
+              <div><code>inference</code>: 8090, health <code>/healthz</code>.</div>
+              <div><code>Databases</code>: verza-db + verza-identity-db.</div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2>How to Preview <span class="badge">Local browser</span></h2>
+          <div class="legend">
+            <div>1) Open <code>verza_infrastructure.html</code> in any browser (Chrome/Edge/Firefox).</div>
+            <div>2) If your environment blocks external CDNs, allow access to <code>cdn.jsdelivr.net</code> (Mermaid renderer).</div>
+            <div>3) Use browser “Print” to export a PDF if needed.</div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>
+
