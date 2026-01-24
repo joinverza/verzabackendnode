@@ -15,9 +15,13 @@ import { createIdentityVerificationsRouter } from "./routers/identityVerificatio
 import { createInstitutionRouter } from "./routers/institution.js";
 import { createMeRouter } from "./routers/me.js";
 import { createNotificationsRouter } from "./routers/notifications.js";
+import { createEscrowRouter } from "./routers/escrow.js";
+import { createGovernanceRouter } from "./routers/governance.js";
 import { createProofsRouter } from "./routers/proofs.js";
+import { createSearchRouter } from "./routers/search.js";
 import { createStubRouter } from "./routers/stubs.js";
 import { createVerifiersRouter } from "./routers/verifiers.js";
+import { createVerificationsRouter } from "./routers/verifications.js";
 
 export type MainApiContext = {
   config: MainApiConfig;
@@ -36,12 +40,12 @@ export function registerMainApiRoutes(app: Express, ctx: MainApiContext) {
 
   api.use("/proofs", requireUser(ctx), createProofsRouter(ctx));
   api.use("/verifiers", requireUser(ctx), createVerifiersRouter(ctx));
-  api.use("/escrow", requireUser(ctx), createStubRouter());
-  api.use("/governance", requireUser(ctx), createStubRouter());
-  api.use("/verifications", requireUser(ctx), createStubRouter());
+  api.use("/escrow", requireUser(ctx), createEscrowRouter(ctx));
+  api.use("/governance", requireUser(ctx), createGovernanceRouter(ctx));
+  api.use("/verifications", requireUser(ctx), createVerificationsRouter(ctx));
   api.use("/identity/verifications", requireUser(ctx), createIdentityVerificationsRouter(ctx));
   api.use("/fiat/payments", createFiatPaymentsRouter(ctx));
-  api.use("/search", requireUser(ctx), createStubRouter());
+  api.use("/search", requireUser(ctx), createSearchRouter(ctx));
   api.use("/shares", createPublicSharesRouter(ctx));
 
   app.use("/api/v1", api);
