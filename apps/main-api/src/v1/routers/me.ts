@@ -2,7 +2,7 @@ import type { Router } from "express";
 
 import crypto from "node:crypto";
 
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import express from "express";
 import { z } from "zod";
 

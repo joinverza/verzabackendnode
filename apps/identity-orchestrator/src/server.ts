@@ -6,6 +6,7 @@ import axios from "axios";
 import { HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { z } from "zod";
 import { createClient } from "redis";
+import promClient from "prom-client";
 
 import { requireUser } from "@verza/auth";
 import { createIdentityOrchestratorConfig } from "@verza/config";
@@ -63,6 +64,20 @@ export async function createIdentityOrchestratorServer() {
 
   const app = createHttpApp({ logger, corsAllowedOrigins: config.CORS_ALLOWED_ORIGINS });
   app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
+
+  if (config.METRICS_ENABLED) {
+    const register = new promClient.Registry();
+    register.setDefaultLabels({ service: "identity-orchestrator" });
+    promClient.collectDefaultMetrics({ register });
+    app.get("/metrics", async (_req, res, next) => {
+      try {
+        res.setHeader("content-type", register.contentType);
+        res.send(await register.metrics());
+      } catch (err) {
+        next(err);
+      }
+    });
+  }
 
   const inference = axios.create({ baseURL: config.INFERENCE_URL, timeout: 60_000 });
 

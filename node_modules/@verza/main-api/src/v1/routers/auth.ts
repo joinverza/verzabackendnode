@@ -2,8 +2,9 @@ import type { Router } from "express";
 
 import crypto from "node:crypto";
 
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import express from "express";
+import nodemailer from "nodemailer";
 import { z } from "zod";
 
 import { createAccessToken, generateRefreshToken, requireUser } from "@verza/auth";
@@ -29,9 +30,12 @@ const refreshSchema = z.object({
   refresh_token: z.string().min(10)
 });
 
-const forgotPasswordSchema = z.object({
-  email: z.string().email()
-});
+const forgotPasswordSchema = z
+  .object({
+    email: z.string().email().optional(),
+    phone: z.string().min(6).optional()
+  })
+  .refine((v) => Boolean(v.email) || Boolean(v.phone), { message: "email or phone required" });
 
 const resetPasswordSchema = z.object({
   token: z.string().min(10),
@@ -118,7 +122,15 @@ export function createAuthRouter(ctx: MainApiContext): Router {
         };
         if (body.twofa_code) twofaArgs.twofaCode = body.twofa_code;
         if (body.backup_code) twofaArgs.backupCode = body.backup_code;
-        verifyTwoFactorOrThrow(twofaArgs);
+        const twofa = verifyTwoFactorOrThrow(twofaArgs);
+        if (twofa.usedBackupCodeSha) {
+          const codes = parseJsonArray(user.backup_codes_sha).filter((h) => h !== twofa.usedBackupCodeSha);
+          await ctx.pool.query("update users set backup_codes_sha=$1, updated_at=$2 where id=$3", [
+            JSON.stringify(codes),
+            now(),
+            user.id
+          ]);
+        }
       }
 
       const refreshToken = generateRefreshToken();
@@ -192,9 +204,14 @@ export function createAuthRouter(ctx: MainApiContext): Router {
   router.post("/forgot-password", async (req, res, next) => {
     try {
       const body = forgotPasswordSchema.parse(req.body);
-      const result = await ctx.pool.query<{ id: string }>("select id from users where email=$1 limit 1", [
-        body.email.toLowerCase()
-      ]);
+      const email = body.email ? body.email.toLowerCase() : null;
+      const phone = body.phone ? body.phone.trim() : null;
+      const result = await ctx.pool.query<{ id: string; email: string; phone: string }>(
+        email
+          ? "select id,email,phone from users where email=$1 limit 1"
+          : "select id,email,phone from users where phone=$1 limit 1",
+        [email ?? phone ?? ""]
+      );
       const user = result.rows[0];
       if (user) {
         const token = generateRefreshToken();
@@ -204,6 +221,13 @@ export function createAuthRouter(ctx: MainApiContext): Router {
           "insert into password_reset_tokens (token_hash, user_id, expires_at, created_at) values ($1,$2,$3,$4) on conflict (token_hash) do nothing",
           [tokenHash, user.id, expiresAt, now()]
         );
+        const resetUrl = buildPasswordResetUrl({ baseUrl: ctx.config.PASSWORD_RESET_BASE_URL, token });
+        await deliverPasswordReset({
+          ctx,
+          toEmail: user.email || null,
+          toPhone: user.phone || null,
+          resetUrl
+        });
       }
       res.json({ status: "ok" });
     } catch (err) {
@@ -226,6 +250,7 @@ export function createAuthRouter(ctx: MainApiContext): Router {
       const newHash = await bcrypt.hash(body.new_password, 10);
       const ts = now();
       await ctx.pool.query("update users set password_hash=$1, updated_at=$2 where id=$3", [newHash, ts, row.user_id]);
+      await ctx.pool.query("update sessions set revoked_at=$1 where user_id=$2 and revoked_at is null", [ts, row.user_id]);
       await ctx.pool.query("update password_reset_tokens set used_at=$1 where token_hash=$2", [ts, tokenHash]);
       res.json({ status: "ok" });
     } catch (err) {
@@ -247,4 +272,113 @@ export function createAuthRouter(ctx: MainApiContext): Router {
   });
 
   return router;
+}
+
+function buildPasswordResetUrl(opts: { baseUrl: string | undefined; token: string }) {
+  const base = (opts.baseUrl ?? "").trim();
+  if (!base) return null;
+  const url = new URL(base);
+  url.searchParams.set("token", opts.token);
+  return url.toString();
+}
+
+function parseJsonArray(s: string) {
+  try {
+    const parsed: unknown = JSON.parse(s || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((x): x is string => typeof x === "string");
+  } catch {
+    return [];
+  }
+}
+
+async function deliverPasswordReset(opts: {
+  ctx: MainApiContext;
+  toEmail: string | null;
+  toPhone: string | null;
+  resetUrl: string | null;
+}) {
+  if (!opts.resetUrl) return;
+
+  const emailOk = await trySendPasswordResetEmail({
+    ctx: opts.ctx,
+    toEmail: opts.toEmail,
+    resetUrl: opts.resetUrl
+  });
+
+  if (emailOk) return;
+
+  await trySendPasswordResetSms({
+    ctx: opts.ctx,
+    toPhone: opts.toPhone,
+    resetUrl: opts.resetUrl
+  });
+}
+
+async function trySendPasswordResetEmail(opts: { ctx: MainApiContext; toEmail: string | null; resetUrl: string }) {
+  const to = (opts.toEmail ?? "").trim();
+  if (!to) return false;
+  const host = String(opts.ctx.config.SMTP_HOST ?? "").trim();
+  const port = typeof opts.ctx.config.SMTP_PORT === "number" ? opts.ctx.config.SMTP_PORT : null;
+  const from = String(opts.ctx.config.SMTP_FROM ?? "").trim();
+  if (!host || !port || !from) return false;
+
+  const transport = nodemailer.createTransport({
+    host,
+    port,
+    secure: Boolean(opts.ctx.config.SMTP_SECURE),
+    auth:
+      opts.ctx.config.SMTP_USER && opts.ctx.config.SMTP_PASS
+        ? { user: opts.ctx.config.SMTP_USER, pass: opts.ctx.config.SMTP_PASS }
+        : undefined
+  });
+
+  try {
+    await transport.sendMail({
+      from,
+      to,
+      subject: "Reset your Verza password",
+      text: `Use this link to reset your password:\n\n${opts.resetUrl}\n\nIf you did not request this, you can ignore this email.`,
+      html: `<p>Use this link to reset your password:</p><p><a href="${opts.resetUrl}">${opts.resetUrl}</a></p><p>If you did not request this, you can ignore this email.</p>`
+    });
+    return true;
+  } catch (err) {
+    opts.ctx.logger.error({ err }, "password reset email delivery failed");
+    return false;
+  }
+}
+
+async function trySendPasswordResetSms(opts: { ctx: MainApiContext; toPhone: string | null; resetUrl: string }) {
+  const to = (opts.toPhone ?? "").trim();
+  if (!to) return false;
+  const sid = String(opts.ctx.config.TWILIO_ACCOUNT_SID ?? "").trim();
+  const token = String(opts.ctx.config.TWILIO_AUTH_TOKEN ?? "").trim();
+  const from = String(opts.ctx.config.TWILIO_FROM_NUMBER ?? "").trim();
+  if (!sid || !token || !from) return false;
+
+  const auth = Buffer.from(`${sid}:${token}`, "utf8").toString("base64");
+  const body = new URLSearchParams();
+  body.set("To", to);
+  body.set("From", from);
+  body.set("Body", `Reset your Verza password: ${opts.resetUrl}`);
+
+  try {
+    const resp = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(sid)}/Messages.json`, {
+      method: "POST",
+      headers: {
+        authorization: `Basic ${auth}`,
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      body
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      opts.ctx.logger.error({ status: resp.status, body: text }, "password reset sms delivery failed");
+      return false;
+    }
+    return true;
+  } catch (err) {
+    opts.ctx.logger.error({ err }, "password reset sms delivery failed");
+    return false;
+  }
 }

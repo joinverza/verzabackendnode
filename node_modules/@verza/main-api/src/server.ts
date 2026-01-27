@@ -5,6 +5,8 @@ import { createMainApiConfig } from "@verza/config";
 import { createPgPool, migrateDatabase } from "@verza/db";
 import { createHttpApp, errorHandler, notFoundHandler } from "@verza/http";
 import { createLogger } from "@verza/observability";
+import promClient from "prom-client";
+import { createClient } from "redis";
 
 import { registerMainApiRoutes } from "./v1/routes.js";
 
@@ -41,13 +43,48 @@ export async function createMainApiServer() {
       next(err);
     }
   });
-  app.get("/health/redis", (_req, res) => res.json({ status: "ok" }));
+  const redisUrlTrimmed = String(config.REDIS_URL ?? "").trim();
+  const redisUrl = redisUrlTrimmed.length ? redisUrlTrimmed : null;
+  const createRedisClient = createClient as unknown as (options: { url: string }) => {
+    connect: () => Promise<void>;
+    ping: () => Promise<string>;
+    quit: () => Promise<void>;
+    isOpen: boolean;
+  };
+  const redis = redisUrl ? createRedisClient({ url: redisUrl }) : null;
+  app.get("/health/redis", async (_req, res, next) => {
+    try {
+      if (!redis) return res.json({ status: "ok", redis: "not_configured" });
+      if (!redis.isOpen) await redis.connect();
+      const pong = await redis.ping();
+      res.json({ status: "ok", redis: pong });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  if (config.METRICS_ENABLED) {
+    const register = new promClient.Registry();
+    register.setDefaultLabels({ service: "main-api" });
+    promClient.collectDefaultMetrics({ register });
+    app.get("/metrics", async (_req, res, next) => {
+      try {
+        res.setHeader("content-type", register.contentType);
+        res.send(await register.metrics());
+      } catch (err) {
+        next(err);
+      }
+    });
+  }
+
+  registerMainApiRoutes(app, { config, logger, pool });
 
   const openapi = buildOpenApiSpec({
     title: "Verza Main API",
     version: "1.0.0",
     serverUrl: `http://localhost:${config.PORT}`
-  });
+  }) as { paths?: Record<string, Record<string, unknown>> };
+  openapi.paths = mergeOpenApiPaths(discoverExpressPaths(app), openapi.paths ?? {});
 
   app.get("/openapi.json", (_req, res) => {
     res.setHeader("cache-control", "no-store");
@@ -66,7 +103,6 @@ export async function createMainApiServer() {
     res.type("text/html").send(getSwaggerUiHtml({ specUrl: "/openapi.json", title: "Verza API Docs" }));
   });
 
-  registerMainApiRoutes(app, { config, logger, pool });
   app.use(notFoundHandler);
   app.use(errorHandler());
 
@@ -84,6 +120,7 @@ export async function createMainApiServer() {
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
       });
+      if (redis?.isOpen) await redis.quit();
       await pool.end();
     }
   };
@@ -532,4 +569,91 @@ function getSwaggerUiHtml(input: { specUrl: string; title: string }) {
 
 function escapeHtml(s: string) {
   return s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+}
+
+function mergeOpenApiPaths(
+  discovered: Record<string, Record<string, unknown>>,
+  manual: Record<string, Record<string, unknown>>
+) {
+  const out: Record<string, Record<string, unknown>> = { ...discovered };
+  for (const [path, ops] of Object.entries(manual)) {
+    out[path] = { ...(out[path] ?? {}), ...ops };
+  }
+  return out;
+}
+
+function discoverExpressPaths(app: unknown) {
+  const out: Record<string, Record<string, unknown>> = {};
+  const stack = getExpressStack(app);
+  walkExpressStack(stack, "", (path, method) => {
+    const p = normalizeOpenApiPath(path);
+    out[p] ??= {};
+    const m = method.toLowerCase();
+    if (!out[p][m]) {
+      out[p][m] = { summary: `${method.toUpperCase()} ${p}`, responses: { 200: { description: "OK" } } };
+    }
+  });
+  return out;
+}
+
+function getExpressStack(app: unknown): unknown[] {
+  const anyApp = app as { _router?: { stack?: unknown[] } };
+  const stack = anyApp?._router?.stack;
+  return Array.isArray(stack) ? stack : [];
+}
+
+function walkExpressStack(stack: unknown[], prefix: string, onRoute: (path: string, method: string) => void) {
+  for (const layer of stack) {
+    const l = layer as {
+      route?: { path?: unknown; methods?: Record<string, boolean> };
+      name?: string;
+      handle?: unknown;
+      regexp?: RegExp;
+    };
+
+    if (l.route?.path && l.route?.methods) {
+      const routePath = typeof l.route.path === "string" ? l.route.path : null;
+      if (!routePath) continue;
+      const full = `${prefix}${routePath}`.replaceAll("//", "/");
+      for (const [m, enabled] of Object.entries(l.route.methods)) {
+        if (enabled) onRoute(full, m);
+      }
+      continue;
+    }
+
+    const childStack = getRouterStack(l.handle);
+    if (l.name === "router" && childStack.length) {
+      const mount = prefix + (regexpToMountPath(l.regexp) ?? "");
+      walkExpressStack(childStack, mount, onRoute);
+    }
+  }
+}
+
+function getRouterStack(handle: unknown): unknown[] {
+  const any = handle as { stack?: unknown[] };
+  return Array.isArray(any?.stack) ? any.stack : [];
+}
+
+function regexpToMountPath(re: RegExp | undefined) {
+  if (!re) return null;
+  const src = re.source;
+  if (src === "^\\/?$") return "";
+  let s = src;
+  s = s.replaceAll("\\/", "/");
+  s = s.replace(/^\^/, "");
+  s = s.replace(/\(\?=\/\|\$\)/g, "");
+  s = s.replace(/\(\?=\\\/\|\$\)/g, "");
+  s = s.replace(/\/\?\$$/, "");
+  s = s.replace(/\$$/, "");
+  s = s.replace(/\(\?:\(\[\^\/]\+\?\)\)/g, "{param}");
+  s = s.replace(/\(\?:\(\[\^\\\/]\+\?\)\)/g, "{param}");
+  s = s.replace(/\(\?:\[\^\/]\+\?\)/g, "{param}");
+  s = s.replace(/\(\?:\[\^\\\/]\+\?\)/g, "{param}");
+  if (!s.startsWith("/")) s = `/${s}`;
+  return s;
+}
+
+function normalizeOpenApiPath(path: string) {
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return p.replaceAll("//", "/");
 }

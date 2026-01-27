@@ -156,10 +156,10 @@ export function verifyTwoFactorOrThrow(opts: {
   backupCode?: string;
 }) {
   const codesSha = parseJsonArray(opts.backupCodesShaJson);
-  if (opts.twofaCode && verifyTotp({ secretBase32: opts.totpSecretBase32, code: opts.twofaCode })) return;
+  if (opts.twofaCode && verifyTotp({ secretBase32: opts.totpSecretBase32, code: opts.twofaCode })) return {};
   if (opts.backupCode) {
     const h = sha256Hex(opts.backupCode);
-    if (codesSha.includes(h)) return;
+    if (codesSha.includes(h)) return { usedBackupCodeSha: h };
   }
   throw unauthorized("invalid_twofa", "Invalid 2FA code");
 }

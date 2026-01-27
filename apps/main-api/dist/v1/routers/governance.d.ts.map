@@ -1,0 +1,1 @@
+{"version":3,"file":"governance.d.ts","sourceRoot":"","sources":["../../../src/v1/routers/governance.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,MAAM,EAAE,MAAM,SAAS,CAAC;AAUtC,OAAO,KAAK,EAAE,cAAc,EAAE,MAAM,cAAc,CAAC;AAYnD,wBAAgB,sBAAsB,CAAC,GAAG,EAAE,cAAc,GAAG,MAAM,CAmElE"}

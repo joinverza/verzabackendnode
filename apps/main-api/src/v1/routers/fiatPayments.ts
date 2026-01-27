@@ -3,6 +3,7 @@ import type { Router } from "express";
 import crypto from "node:crypto";
 
 import express from "express";
+import Stripe from "stripe";
 import { z } from "zod";
 
 import { requireAdmin } from "@verza/auth";
@@ -20,6 +21,8 @@ const idSchema = z.object({ id: z.string().uuid() });
 
 export function createFiatPaymentsRouter(ctx: MainApiContext): Router {
   const router = express.Router();
+  const stripeKey = String(ctx.config.STRIPE_SECRET_KEY ?? "").trim();
+  const stripe = stripeKey ? new Stripe(stripeKey, { apiVersion: "2025-08-27.basil" }) : null;
 
   router.post("/initiate", async (req, res, next) => {
     try {
@@ -49,7 +52,26 @@ export function createFiatPaymentsRouter(ctx: MainApiContext): Router {
         "insert into fiat_payment_sessions (id, did_hash, amount_minor, currency, created_at, updated_at) values ($1,$2,$3,$4,$5,$6)",
         [id, didHash, body.amount_minor, body.currency, ts, ts]
       );
-      res.json({ id, status: "initiated" });
+      let stripeClientSecret: string | null = null;
+      let stripePaymentIntentId: string | null = null;
+      let stripeStatus: string | null = null;
+
+      if (stripe) {
+        const intent = await stripe.paymentIntents.create({
+          amount: body.amount_minor,
+          currency: body.currency.toLowerCase(),
+          metadata: { verza_payment_id: id, verza_did_hash: didHash }
+        });
+        stripeClientSecret = intent.client_secret ?? null;
+        stripePaymentIntentId = intent.id;
+        stripeStatus = intent.status;
+        await ctx.pool.query(
+          "update fiat_payment_sessions set stripe_payment_intent_id=$1, stripe_client_secret=$2, stripe_status=$3, updated_at=$4 where id=$5",
+          [intent.id, intent.client_secret ?? "", intent.status, new Date(), id]
+        );
+      }
+
+      res.json({ id, status: "initiated", stripe_payment_intent_id: stripePaymentIntentId, stripe_status: stripeStatus, stripe_client_secret: stripeClientSecret });
     } catch (err) {
       next(err);
     }
@@ -86,9 +108,113 @@ export function createFiatPaymentsRouter(ctx: MainApiContext): Router {
     }
   });
 
-  router.post("/reconcile", requireAdmin(ctx), async (_req, res) => {
-    res.json({ status: "ok" });
+  router.post("/stripe/webhook", async (req, res, next) => {
+    try {
+      if (!stripe) return res.status(501).json({ status: "not_configured" });
+      const secret = String(ctx.config.STRIPE_WEBHOOK_SECRET ?? "").trim();
+      if (!secret) return res.status(501).json({ status: "not_configured" });
+      const sig = String(req.header("stripe-signature") ?? "");
+      if (!sig) throw badRequest("missing_stripe_signature", "Missing stripe-signature");
+      const raw = req.bodyRaw ?? Buffer.from("");
+      const event = stripe.webhooks.constructEvent(raw, sig, secret);
+
+      const pi = event.data.object as Stripe.PaymentIntent;
+      const paymentIntentId = typeof pi?.id === "string" ? pi.id : null;
+      if (!paymentIntentId) return res.json({ status: "ok" });
+
+      const mapped = mapStripePaymentIntentStatus({ eventType: event.type, status: pi.status });
+      await ctx.pool.query("begin");
+      try {
+        const sess = await ctx.pool.query<{ id: string; amount_minor: string | number; currency: string }>(
+          "select id, amount_minor, currency from fiat_payment_sessions where stripe_payment_intent_id=$1 limit 1",
+          [paymentIntentId]
+        );
+        const row = sess.rows[0];
+        if (row) {
+          await ctx.pool.query("update fiat_payment_sessions set stripe_status=$1, status=$2, updated_at=$3 where id=$4", [
+            pi.status ?? "",
+            mapped,
+            new Date(),
+            row.id
+          ]);
+          if (mapped === "paid") {
+            await ctx.pool.query(
+              "insert into ledger_entries (id, payment_id, amount_minor, currency, stripe_payment_intent_id, created_at) select $1,$2,$3,$4,$5,$6 where not exists (select 1 from ledger_entries where payment_id=$2)",
+              [crypto.randomUUID(), row.id, row.amount_minor, row.currency, paymentIntentId, new Date()]
+            );
+          }
+        }
+        await ctx.pool.query("commit");
+      } catch (err) {
+        await ctx.pool.query("rollback");
+        throw err;
+      }
+
+      res.json({ status: "ok" });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post("/reconcile", requireAdmin(ctx), async (_req, res, next) => {
+    try {
+      if (!stripe) return res.status(501).json({ status: "not_configured" });
+      const result = await ctx.pool.query<{ id: string; stripe_payment_intent_id: string }>(
+        "select id, stripe_payment_intent_id from fiat_payment_sessions where stripe_payment_intent_id <> '' and status not in ('paid','failed','canceled') order by updated_at asc limit 50"
+      );
+      let updated = 0;
+      for (const row of result.rows) {
+        const piId = row.stripe_payment_intent_id;
+        if (!piId) continue;
+        const pi = await stripe.paymentIntents.retrieve(piId);
+        const mapped = mapStripePaymentIntentStatus({ eventType: null, status: pi.status });
+        await ctx.pool.query("begin");
+        try {
+          await ctx.pool.query("update fiat_payment_sessions set stripe_status=$1, status=$2, updated_at=$3 where id=$4", [
+            pi.status ?? "",
+            mapped,
+            new Date(),
+            row.id
+          ]);
+          if (mapped === "paid") {
+            const sess = await ctx.pool.query<{ amount_minor: string | number; currency: string }>(
+              "select amount_minor, currency from fiat_payment_sessions where id=$1 limit 1",
+              [row.id]
+            );
+            const s = sess.rows[0];
+            if (s) {
+              await ctx.pool.query(
+                "insert into ledger_entries (id, payment_id, amount_minor, currency, stripe_payment_intent_id, created_at) select $1,$2,$3,$4,$5,$6 where not exists (select 1 from ledger_entries where payment_id=$2)",
+                [crypto.randomUUID(), row.id, s.amount_minor, s.currency, piId, new Date()]
+              );
+            }
+          }
+          await ctx.pool.query("commit");
+          updated++;
+        } catch (err) {
+          await ctx.pool.query("rollback");
+          throw err;
+        }
+      }
+      res.json({ status: "ok", checked: result.rowCount, updated });
+    } catch (err) {
+      next(err);
+    }
   });
 
   return router;
+}
+
+function mapStripePaymentIntentStatus(input: { eventType: string | null; status: string | null | undefined }) {
+  if (input.eventType === "payment_intent.payment_failed") return "failed";
+  if (input.eventType === "payment_intent.canceled") return "canceled";
+  if (input.eventType === "payment_intent.succeeded") return "paid";
+
+  const s = String(input.status ?? "");
+  if (s === "succeeded") return "paid";
+  if (s === "canceled") return "canceled";
+  if (s === "processing") return "processing";
+  if (s === "requires_confirmation" || s === "requires_action" || s === "requires_capture") return "processing";
+  if (s === "requires_payment_method") return "initiated";
+  return "initiated";
 }

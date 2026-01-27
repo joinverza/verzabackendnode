@@ -8,6 +8,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createIdentityGatewayConfig } from "@verza/config";
 import { createHttpApp, errorHandler, notFoundHandler } from "@verza/http";
 import { createLogger } from "@verza/observability";
+import promClient from "prom-client";
 import { z } from "zod";
 
 const sessionsSchema = z.object({
@@ -30,6 +31,20 @@ export function createIdentityGatewayServer() {
 
   const app = createHttpApp({ logger, corsAllowedOrigins: config.CORS_ALLOWED_ORIGINS });
   app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
+
+  if (config.METRICS_ENABLED) {
+    const register = new promClient.Registry();
+    register.setDefaultLabels({ service: "identity-gateway" });
+    promClient.collectDefaultMetrics({ register });
+    app.get("/metrics", async (_req, res, next) => {
+      try {
+        res.setHeader("content-type", register.contentType);
+        res.send(await register.metrics());
+      } catch (err) {
+        next(err);
+      }
+    });
+  }
 
   const httpClient = axios.create({ baseURL: config.ORCHESTRATOR_URL, timeout: 30_000 });
 

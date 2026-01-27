@@ -67,6 +67,10 @@ export declare function verifyTwoFactorOrThrow(opts: {
     backupCodesShaJson: string;
     twofaCode?: string;
     backupCode?: string;
-}): void;
+}): {
+    usedBackupCodeSha?: never;
+} | {
+    usedBackupCodeSha: string;
+};
 export {};
 //# sourceMappingURL=index.d.ts.map

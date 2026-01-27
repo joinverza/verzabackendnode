@@ -6,6 +6,7 @@ export declare function createMainApiConfig(env: NodeJS.ProcessEnv): {
     HOST: string;
     PORT: number;
     LOG_LEVEL: string;
+    METRICS_ENABLED: boolean;
     CORS_ALLOWED_ORIGINS: string[];
     DATABASE_URL: string;
     JWT_SECRET: string;
@@ -14,12 +15,26 @@ export declare function createMainApiConfig(env: NodeJS.ProcessEnv): {
     REFRESH_TOKEN_TTL_SECONDS: number;
     ENCRYPTION_MASTER_KEY_B64: string;
     RECEIPT_ED25519_SEED_B64: string;
+    SMTP_SECURE: boolean;
     NODE_ENV?: string | undefined;
+    REDIS_URL?: string | undefined;
+    PASSWORD_RESET_BASE_URL?: string | undefined;
+    SMTP_HOST?: string | undefined;
+    SMTP_PORT?: number | undefined;
+    SMTP_USER?: string | undefined;
+    SMTP_PASS?: string | undefined;
+    SMTP_FROM?: string | undefined;
+    TWILIO_ACCOUNT_SID?: string | undefined;
+    TWILIO_AUTH_TOKEN?: string | undefined;
+    TWILIO_FROM_NUMBER?: string | undefined;
+    STRIPE_SECRET_KEY?: string | undefined;
+    STRIPE_WEBHOOK_SECRET?: string | undefined;
 };
 export declare function createIdentityGatewayConfig(env: NodeJS.ProcessEnv): {
     HOST: string;
     PORT: number;
     LOG_LEVEL: string;
+    METRICS_ENABLED: boolean;
     CORS_ALLOWED_ORIGINS: string[];
     ORCHESTRATOR_URL: string;
     S3_ENDPOINT: string;
@@ -34,6 +49,7 @@ export declare function createIdentityOrchestratorConfig(env: NodeJS.ProcessEnv)
     HOST: string;
     PORT: number;
     LOG_LEVEL: string;
+    METRICS_ENABLED: boolean;
     CORS_ALLOWED_ORIGINS: string[];
     JWT_SECRET: string;
     JWT_ISSUER: string;
@@ -41,11 +57,11 @@ export declare function createIdentityOrchestratorConfig(env: NodeJS.ProcessEnv)
     IDENTITY_DATABASE_URL: string;
     INFERENCE_URL: string;
     NODE_ENV?: string | undefined;
+    REDIS_URL?: string | undefined;
     S3_ENDPOINT?: string | undefined;
     S3_ACCESS_KEY_ID?: string | undefined;
     S3_SECRET_ACCESS_KEY?: string | undefined;
     S3_BUCKET?: string | undefined;
     S3_REGION?: string | undefined;
-    REDIS_URL?: string | undefined;
 };
 //# sourceMappingURL=index.d.ts.map

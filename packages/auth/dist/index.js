@@ -121,11 +121,11 @@ export function verifyTotp(opts) {
 export function verifyTwoFactorOrThrow(opts) {
     const codesSha = parseJsonArray(opts.backupCodesShaJson);
     if (opts.twofaCode && verifyTotp({ secretBase32: opts.totpSecretBase32, code: opts.twofaCode }))
-        return;
+        return {};
     if (opts.backupCode) {
         const h = sha256Hex(opts.backupCode);
         if (codesSha.includes(h))
-            return;
+            return { usedBackupCodeSha: h };
     }
     throw unauthorized("invalid_twofa", "Invalid 2FA code");
 }

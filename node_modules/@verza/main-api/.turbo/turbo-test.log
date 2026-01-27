@@ -1,4 +1,20 @@
 
 > test
-> node -e "process.exit(0)"
+> node --test dist/**/*.test.js
 
+TAP version 13
+# Subtest: POST /forgot-password is always ok (no user)
+ok 1 - POST /forgot-password is always ok (no user)
+  ---
+  duration_ms: 137.9881
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1147.958
