@@ -5,10 +5,12 @@ import { createHttpApp, errorHandler, notFoundHandler } from "@verza/http";
 import { createLogger } from "@verza/observability";
 import promClient from "prom-client";
 import { createClient } from "redis";
+import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { registerMainApiRoutes } from "./v1/routes.js";
 import { authTokensResponseSchema, forgotPasswordSchema, loginSchema, okResponseSchema, refreshSchema, resetPasswordSchema, signupSchema } from "./v1/routers/auth.js";
 import { shareResponseSchema, shareSchema, storeResponseSchema, storeSchema } from "./v1/routers/credentials.js";
+import { idSchema as fiatPaymentIdParamsSchema, initiateResponseSchema, initiateSchema as fiatInitiateSchema, notConfiguredResponseSchema, paymentStatusResponseSchema, receiptQuerySchema, receiptResponseSchema, reconcileResponseSchema } from "./v1/routers/fiatPayments.js";
 export async function createMainApiServer() {
     const config = createMainApiConfig(process.env);
     const logger = createLogger({ service: "main-api", level: config.LOG_LEVEL });
@@ -569,6 +571,14 @@ function mergeOpenApiPaths(discovered, manual) {
 function enhanceOpenApiFromZod(openapi) {
     const paths = openapi.paths ?? {};
     openapi.paths = paths;
+    const errorEnvelopeSchema = z.object({
+        error: z.object({
+            code: z.string(),
+            message: z.string(),
+            details: z.record(z.any()),
+            request_id: z.string()
+        })
+    });
     const zodByRoute = {
         "post /api/v1/auth/signup": { request: signupSchema, response: authTokensResponseSchema },
         "post /api/v1/auth/login": { request: loginSchema, response: authTokensResponseSchema },
@@ -577,7 +587,40 @@ function enhanceOpenApiFromZod(openapi) {
         "post /api/v1/auth/reset-password": { request: resetPasswordSchema, response: okResponseSchema },
         "post /api/v1/auth/logout": { response: okResponseSchema },
         "post /api/v1/credentials/store": { request: storeSchema, response: storeResponseSchema },
-        "post /api/v1/credentials/share": { request: shareSchema, response: shareResponseSchema }
+        "post /api/v1/credentials/share": { request: shareSchema, response: shareResponseSchema },
+        "post /api/v1/fiat/payments/initiate": { request: fiatInitiateSchema, response: initiateResponseSchema },
+        "get /api/v1/fiat/payments/{id}/status": { params: fiatPaymentIdParamsSchema, response: paymentStatusResponseSchema },
+        "get /api/v1/fiat/payments/{id}/receipt": { params: fiatPaymentIdParamsSchema, query: receiptQuerySchema, response: receiptResponseSchema },
+        "post /api/v1/fiat/payments/stripe/webhook": { responses: { "200": okResponseSchema, "501": notConfiguredResponseSchema } },
+        "post /api/v1/fiat/payments/reconcile": { responses: { "200": reconcileResponseSchema, "501": notConfiguredResponseSchema } }
+    };
+    const errorEnvelopeJsonSchema = stripJsonSchemaMeta(zodToJsonSchema(errorEnvelopeSchema));
+    const ensureErrorResponses = (op) => {
+        op.responses ??= {};
+        for (const status of ["400", "401", "403", "404", "500"]) {
+            op.responses[status] ??= { description: "Error", content: { "application/json": { schema: errorEnvelopeJsonSchema } } };
+            op.responses[status].content ??= {};
+            op.responses[status].content["application/json"] ??= { schema: errorEnvelopeJsonSchema };
+        }
+    };
+    const addParamsFromZodObject = (op, input) => {
+        const jsonSchema = stripJsonSchemaMeta(zodToJsonSchema(input.zodSchema));
+        const properties = jsonSchema?.properties;
+        if (!properties || typeof properties !== "object")
+            return;
+        const required = Array.isArray(jsonSchema.required) ? jsonSchema.required : [];
+        op.parameters ??= [];
+        const existing = Array.isArray(op.parameters) ? op.parameters : [];
+        const existingNames = new Set(existing
+            .map((p) => (p && typeof p === "object" ? `${String(p.in ?? "")}:${String(p.name ?? "")}` : ""))
+            .filter((s) => s.length));
+        for (const [name, schema] of Object.entries(properties)) {
+            const key = `${input.in}:${name}`;
+            if (existingNames.has(key))
+                continue;
+            existing.push({ in: input.in, name, required: input.in === "path" ? true : required.includes(name), schema });
+        }
+        op.parameters = existing;
     };
     for (const [key, zod] of Object.entries(zodByRoute)) {
         const [method, path] = key.split(" ", 2);
@@ -587,6 +630,12 @@ function enhanceOpenApiFromZod(openapi) {
         const op = ops[method];
         if (!op || typeof op !== "object")
             continue;
+        if (zod.params) {
+            addParamsFromZodObject(op, { zodSchema: zod.params, in: "path" });
+        }
+        if (zod.query) {
+            addParamsFromZodObject(op, { zodSchema: zod.query, in: "query" });
+        }
         if (zod.request && !op.requestBody) {
             const jsonSchema = zodToJsonSchema(zod.request);
             const schema = typeof jsonSchema === "object" && jsonSchema ? stripJsonSchemaMeta(jsonSchema) : {};
@@ -597,20 +646,56 @@ function enhanceOpenApiFromZod(openapi) {
                 }
             };
         }
-        if (zod.response) {
-            op.responses ??= {};
-            op.responses["200"] ??= { description: "OK" };
-            op.responses["200"].content ??= {};
-            if (!op.responses["200"].content["application/json"]) {
-                const jsonSchema = zodToJsonSchema(zod.response);
+        op.responses ??= {};
+        const addResponseSchema = (status, schemaZod) => {
+            op.responses[status] ??= { description: status === "200" ? "OK" : "Response" };
+            op.responses[status].content ??= {};
+            if (!op.responses[status].content["application/json"]) {
+                const jsonSchema = zodToJsonSchema(schemaZod);
                 const schema = typeof jsonSchema === "object" && jsonSchema ? stripJsonSchemaMeta(jsonSchema) : {};
-                op.responses["200"].content["application/json"] = { schema };
+                op.responses[status].content["application/json"] = { schema };
             }
+        };
+        if (zod.responses) {
+            for (const [status, schemaZod] of Object.entries(zod.responses)) {
+                addResponseSchema(status, schemaZod);
+            }
+        }
+        else if (zod.response) {
+            addResponseSchema("200", zod.response);
+        }
+        ensureErrorResponses(op);
+        const pathParams = extractOpenApiPathParams(path);
+        if (pathParams.length) {
+            op.parameters ??= [];
+            const existing = Array.isArray(op.parameters) ? op.parameters : [];
+            const existingNames = new Set(existing
+                .map((p) => (p && typeof p === "object" ? `${String(p.in ?? "")}:${String(p.name ?? "")}` : ""))
+                .filter((s) => s.length));
+            for (const name of pathParams) {
+                const key = `path:${name}`;
+                if (existingNames.has(key))
+                    continue;
+                existing.push({ in: "path", name, required: true, schema: { type: "string" } });
+            }
+            op.parameters = existing;
+        }
+    }
+    for (const ops of Object.values(paths)) {
+        for (const [method, op] of Object.entries(ops ?? {})) {
+            if (!op || typeof op !== "object")
+                continue;
+            if (!["get", "post", "put", "patch", "delete"].includes(method))
+                continue;
+            ensureErrorResponses(op);
         }
     }
 }
 function stripJsonSchemaMeta(schema) {
-    const { $schema: _s, ...rest } = schema ?? {};
+    const rest = { ...(schema ?? {}) };
+    if (rest && typeof rest === "object") {
+        delete rest.$schema;
+    }
     return rest;
 }
 function discoverExpressPaths(app) {
@@ -679,6 +764,19 @@ function regexpToMountPath(re) {
 }
 function normalizeOpenApiPath(path) {
     const p = path.startsWith("/") ? path : `/${path}`;
-    return p.replaceAll("//", "/");
+    return p.replaceAll("//", "/").replace(/:([A-Za-z0-9_]+)/g, "{$1}");
+}
+function extractOpenApiPathParams(path) {
+    const names = [];
+    const re = /\{([A-Za-z0-9_]+)\}/g;
+    for (;;) {
+        const m = re.exec(path);
+        if (!m)
+            break;
+        const name = m[1] ?? "";
+        if (name && !names.includes(name))
+            names.push(name);
+    }
+    return names;
 }
 //# sourceMappingURL=server.js.map

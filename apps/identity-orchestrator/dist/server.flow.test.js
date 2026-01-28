@@ -65,7 +65,7 @@ void test("identity-orchestrator flow: create -> media -> run sync completes", a
                 return { rowCount: row ? 1 : 0, rows: [] };
             }
             if (q.startsWith("insert into identity_media")) {
-                const [_id, verificationId, key, kind] = params;
+                const [, verificationId, key, kind] = params;
                 const arr = mediaByVerification.get(verificationId) ?? [];
                 arr.push({ key, kind });
                 mediaByVerification.set(verificationId, arr);

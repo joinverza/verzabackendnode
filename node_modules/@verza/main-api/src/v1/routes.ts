@@ -2,6 +2,7 @@ import type { Express } from "express";
 import type { Pool } from "pg";
 import type { Logger } from "@verza/observability";
 import type { MainApiConfig } from "@verza/config";
+import type Stripe from "stripe";
 
 import express from "express";
 
@@ -28,6 +29,7 @@ export type MainApiContext = {
   config: MainApiConfig;
   logger: Logger;
   pool: Pool;
+  stripe?: Stripe;
 };
 
 export function registerMainApiRoutes(app: Express, ctx: MainApiContext) {

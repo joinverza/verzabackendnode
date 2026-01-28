@@ -5,15 +5,52 @@ import { z } from "zod";
 import { requireAdmin } from "@verza/auth";
 import { sha256Hex, signReceipt, verifyDidSignedRequest } from "@verza/crypto";
 import { badRequest, notFound } from "@verza/http";
-const initiateSchema = z.object({
+export const initiateSchema = z.object({
     amount_minor: z.number().int().positive(),
     currency: z.string().min(3).max(8)
 });
-const idSchema = z.object({ id: z.string().uuid() });
+export const idSchema = z.object({ id: z.string().uuid() });
+export const initiateResponseSchema = z.object({
+    id: z.string().uuid(),
+    status: z.literal("initiated"),
+    stripe_payment_intent_id: z.string().nullable(),
+    stripe_status: z.string().nullable(),
+    stripe_client_secret: z.string().nullable()
+});
+export const paymentStatusResponseSchema = z.object({
+    id: z.string().uuid(),
+    status: z.string(),
+    stripe_status: z.string().nullable().optional(),
+    amount_minor: z.union([z.number().int(), z.string().regex(/^\d+$/)]),
+    currency: z.string(),
+    created_at: z.any(),
+    updated_at: z.any()
+});
+export const receiptQuerySchema = z.object({
+    format: z.string().optional()
+});
+export const receiptResponseSchema = z.object({
+    receipt: z.object({
+        payment_id: z.string().uuid(),
+        amount_minor: z.union([z.number().int(), z.string().regex(/^\d+$/)]),
+        currency: z.string(),
+        issued_at: z.string()
+    }),
+    sig_kid: z.string(),
+    sig_b64: z.string()
+});
+export const reconcileResponseSchema = z.object({
+    status: z.literal("ok"),
+    checked: z.number().int(),
+    updated: z.number().int()
+});
+export const notConfiguredResponseSchema = z.object({
+    status: z.literal("not_configured")
+});
 export function createFiatPaymentsRouter(ctx) {
     const router = express.Router();
     const stripeKey = String(ctx.config.STRIPE_SECRET_KEY ?? "").trim();
-    const stripe = stripeKey ? new Stripe(stripeKey, { apiVersion: "2025-08-27.basil" }) : null;
+    const stripe = ctx.stripe ?? (stripeKey ? new Stripe(stripeKey, { apiVersion: "2025-08-27.basil" }) : null);
     router.post("/initiate", async (req, res, next) => {
         try {
             const body = initiateSchema.parse(req.body);

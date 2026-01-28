@@ -16,7 +16,7 @@ void test("auth flow: signup -> login -> refresh -> logout", async () => {
         query: async (sql, params = []) => {
             const q = sql.replace(/\s+/g, " ").trim().toLowerCase();
             if (q.startsWith("select id from users where email=$1")) {
-                const email = String(params[0] ?? "");
+                const email = typeof params[0] === "string" ? params[0] : "";
                 const u = usersByEmail.get(email);
                 return { rowCount: u ? 1 : 0, rows: u ? [{ id: u.id }] : [] };
             }
@@ -44,7 +44,7 @@ void test("auth flow: signup -> login -> refresh -> logout", async () => {
                 return { rowCount: 1, rows: [] };
             }
             if (q.startsWith("select id,email,password_hash,role,twofa_enabled,twofa_secret,backup_codes_sha from users where email=$1")) {
-                const email = String(params[0] ?? "");
+                const email = typeof params[0] === "string" ? params[0] : "";
                 const u = usersByEmail.get(email);
                 return { rowCount: u ? 1 : 0, rows: u ? [u] : [] };
             }
@@ -52,7 +52,7 @@ void test("auth flow: signup -> login -> refresh -> logout", async () => {
                 return { rowCount: 1, rows: [] };
             }
             if (q.startsWith("select s.id, s.user_id, s.expires_at, s.revoked_at, u.role, u.email from sessions s join users u")) {
-                const refreshHash = String(params[0] ?? "");
+                const refreshHash = typeof params[0] === "string" ? params[0] : "";
                 const s = sessionsByRefreshHash.get(refreshHash);
                 if (!s)
                     return { rowCount: 0, rows: [] };
