@@ -15,15 +15,23 @@ Last updated: 2026-01-27
 - Identity orchestrator quality fixes and semantics hardening:
   - Redis client typing fixes + `exactOptionalPropertyTypes` fixes in [server.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/identity-orchestrator/src/server.ts)
   - Workspace verification: `npm run lint`, `npm run typecheck`, `npm test` passed
+- Completed auth + payments + ops hardening in `main-api`:
+  - Password reset delivery attempts (SMTP first, then Twilio SMS fallback) in [auth.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/auth.ts)
+  - 2FA backup codes are now consumed (one-time use) on successful login in [auth.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/auth.ts) using [auth/index.ts](file:///c:/Users/User/Desktop/verzabackendnode/packages/auth/src/index.ts)
+  - Stripe webhook handling + admin reconciliation endpoint in [fiatPayments.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/fiatPayments.ts)
+  - Real Redis connectivity check in [main-api/server.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/server.ts)
+  - `/metrics` endpoints (gated by `METRICS_ENABLED=true`) in all Node services:
+    - [main-api/server.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/server.ts)
+    - [identity-gateway/server.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/identity-gateway/src/server.ts)
+    - [identity-orchestrator/server.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/identity-orchestrator/src/server.ts)
+  - Fixed Windows-native `bcrypt` binding test failures by switching `main-api` to `bcryptjs`:
+    - [main-api/package.json](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/package.json)
+    - [auth.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/auth.ts), [me.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/me.ts)
 
 ## Next Tasks (Recommended Order)
-1. Implement password reset delivery (email/SMS) + secure reset link flow.
-2. Consume/invalidate 2FA backup codes when used (one-time use).
-3. Complete Stripe/fiat reconciliation (webhooks/polling + `reconcile` endpoint).
-4. Make `/health/redis` perform a real Redis connectivity check.
-5. Add `/metrics` endpoints when `METRICS_ENABLED=true`.
-6. Add integration tests for auth/identity flows and admin surfaces.
-7. Generate OpenAPI from code to reduce spec drift.
+1. Add integration tests for auth/identity flows and admin surfaces.
+2. Generate OpenAPI from code to reduce spec drift (beyond path discovery).
+3. Harden fiat payments (Stripe event idempotency, refunds/chargebacks, richer reconciliation).
 
 ## Repo Layout (What Exists)
 - `apps/main-api/` — Verza API (Express). Entry: [index.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/index.ts), server: [server.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/server.ts)
@@ -74,8 +82,9 @@ Server wiring (middlewares + health + OpenAPI + Swagger UI + route registration)
 #### Health + Docs (Public)
 - `GET /health` — returns `{status:"ok"}`
 - `GET /health/db` — runs `select 1`
-- `GET /health/redis` — placeholder returns `{status:"ok"}`
-- `GET /openapi.json`, `GET /swagger.json` — OpenAPI 3.0.3 JSON (hand-authored spec)
+- `GET /health/redis` — connects and `PING`s Redis (or returns `not_configured`)
+- `GET /metrics` — Prometheus metrics (only when `METRICS_ENABLED=true`)
+- `GET /openapi.json`, `GET /swagger.json` — OpenAPI 3.0.3 JSON (hybrid: hand-authored base + runtime route discovery)
 - `GET /docs` — Swagger UI
 - `GET /swaggerdocs` — redirects to `/docs`
 
@@ -84,7 +93,7 @@ Implemented in [auth.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/mai
 - `POST /api/v1/auth/signup` — creates user + session, returns access/refresh tokens
 - `POST /api/v1/auth/login` — checks password + optional 2FA, creates session, returns tokens
 - `POST /api/v1/auth/refresh` — rotates refresh token for matching session hash, returns new tokens
-- `POST /api/v1/auth/forgot-password` — stores reset token (does not deliver it)
+- `POST /api/v1/auth/forgot-password` — stores reset token and attempts delivery (email/SMS) when configured
 - `POST /api/v1/auth/reset-password` — validates token hash and updates password
 - `POST /api/v1/auth/logout` — revokes current session (requires JWT)
 
@@ -244,11 +253,10 @@ Implemented in [inference/app.py](file:///c:/Users/User/Desktop/verzabackendnode
 ## Current Implementations (Incomplete / Stubbed)
 
 ### main-api endpoints that exist but are placeholders
-- `POST /api/v1/fiat/payments/reconcile` — returns `{status:"ok"}` (no Stripe reconciliation logic)
-- `GET /health/redis` — always ok (no Redis check)
+- None identified in the previously stubbed set; remaining gaps are primarily scope/completeness and production hardening.
 
-### “metrics” is configured but not implemented
-`docker-compose.yml` sets `METRICS_ENABLED`, but none of the Node services expose `/metrics`.
+### OpenAPI is hybrid (partially hand-authored)
+- `main-api` serves OpenAPI and Swagger UI, but the spec is still partly hand-authored, and route discovery mainly reduces drift on route presence rather than request/response schema completeness.
 
 ## What Must Be Added To Make The Project “Complete”
 This section is anchored to the required scope described in [NODE_MONOREPO_IMPLEMENTATION_PROMPT.md](file:///c:/Users/User/Desktop/verzabackendnode/NODE_MONOREPO_IMPLEMENTATION_PROMPT.md). The current codebase implements only a subset of that API surface and business logic.
@@ -273,11 +281,12 @@ Practical implementation steps:
   - Consistent error envelope (already implemented in `@verza/http`)
 
 ### 2) Main API: finish partial flows
-- **Password reset delivery**: `forgot-password` currently stores a token hash but never delivers a reset link/token to a user (email/SMS integration missing).
-- **2FA backup codes lifecycle**: backup codes are checked but not consumed/invalidated when used.
-- **Fiat payments**: Stripe integration, reconciliation, and webhook/polling as required by your spec.
-- **OpenAPI/Swagger**: implemented as a hand-maintained OpenAPI JSON spec + Swagger UI (`/openapi.json`, `/docs`); remaining scope is to generate from code to reduce drift.
-- **Redis health**: implement actual Redis connectivity checks if Redis is a real dependency.
+- **Password reset delivery**: implemented (email/SMS delivery attempts) in [auth.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/auth.ts); remaining scope is production hardening (rate limits, templating, deliverability monitoring).
+- **2FA backup codes lifecycle**: implemented (one-time consumption on successful login) in [auth.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/auth.ts) + [auth/index.ts](file:///c:/Users/User/Desktop/verzabackendnode/packages/auth/src/index.ts).
+- **Fiat payments**: implemented Stripe webhook + admin reconcile endpoint in [fiatPayments.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/fiatPayments.ts); remaining scope is broader coverage (refunds/chargebacks, event idempotency, reconciliation depth).
+- **OpenAPI/Swagger**: implemented as a hybrid spec (hand-authored base + runtime route discovery); remaining scope is to generate richer schemas from code to reduce drift further.
+- **Redis health**: implemented as a real connectivity check in [main-api/server.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/server.ts).
+- **Metrics**: implemented behind `METRICS_ENABLED=true` in all Node services.
 
 ### 3) Identity subsystem: complete orchestrator semantics
 The orchestrator now supports production-critical capabilities:
@@ -289,9 +298,12 @@ The orchestrator now supports production-critical capabilities:
 
 ### 4) Tests
 There are workspace scripts for `lint`, `typecheck`, and `test` (see [package.json](file:///c:/Users/User/Desktop/verzabackendnode/package.json)), but critical workflow tests are not present in the code reviewed:
-- Add unit tests for crypto/auth primitives (JWT verification, TOTP, DID signature verification).
-- Add integration tests for auth + session lifecycle, credentials encryption roundtrip, and institution API-key enforcement.
-- Add integration tests for identity gateway/orchestrator happy paths (session -> verification -> media -> run).
+- Unit tests exist for 2FA backup code verification in [twofa.test.ts](file:///c:/Users/User/Desktop/verzabackendnode/packages/auth/src/twofa.test.ts).
+- Minimal auth route test exists for forgot-password behavior in [auth.test.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/auth.test.ts).
+- Remaining gaps:
+  - Add unit tests for crypto/auth primitives (JWT verification, DID signature verification).
+  - Add integration tests for auth + session lifecycle, credentials encryption roundtrip, and institution API-key enforcement.
+  - Add integration tests for identity gateway/orchestrator happy paths (session -> verification -> media -> run).
 
 ## Security & Compliance Assessment (Current vs Needed)
 
@@ -302,7 +314,7 @@ There are workspace scripts for `lint`, `typecheck`, and `test` (see [package.js
 - **Rate limiting**: global request rate limit middleware (coarse)
 - **CORS allowlist**: configurable allowlist in `packages/http`
 - **Credential data at rest**: AES-GCM encryption via HKDF-derived keys for stored JSON payloads (credentials)
-- **Password storage**: bcrypt hashing (signup/login/change-password/reset-password)
+- **Password storage**: bcrypt hashing (implemented via `bcryptjs`) for signup/login/change-password/reset-password
 - **Session handling**: refresh token stored as SHA-256 hash; logout revokes session
 - **JWT verification**: HMAC SHA-256 with timing-safe signature comparison
 - **Institution access**: API keys hashed and checked against DB + institution status checks
@@ -312,10 +324,9 @@ There are workspace scripts for `lint`, `typecheck`, and `test` (see [package.js
 - **Privileged completion of identity decisions**: user cannot self-complete identity verification; completion is admin-only and attestation is institution-only with consent
 
 ### High-risk gaps (should be addressed before production)
-- **Password reset flow has no delivery channel** (tokens can be created but users cannot complete flow in practice).
-- **Backup codes are not consumed** when used; a stolen code remains reusable until rotated/reset.
 - **TLS termination + edge headers are assumed external**: the apps do not enforce HTTPS themselves (expected at load balancer/ingress).
-- **OpenAPI spec is not generated from code**: the current spec is hand-maintained, so drift risk still exists.
+- **Fiat payments need deeper payment-event coverage**: refund/chargeback paths, stronger event idempotency, and reconciliation completeness should be added.
+- **OpenAPI generation is not fully code-driven**: drift risk is reduced but not eliminated (spec schema completeness still depends on manual work).
 
 ### Compliance-readiness notes (what exists vs what auditors usually expect)
 - **SOC2-style controls**: logging exists, but you likely need audit logging for admin actions, access events, and key lifecycle events; plus retention policies and access controls.
