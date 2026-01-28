@@ -34,7 +34,7 @@ void test("fiat/stripe: webhook handles paid/refunded/disputed and idempotency",
                 return { rowCount: 1, rows: [{ id: row.id, amount_minor: row.amount_minor, currency: row.currency }] };
             }
             if (q.startsWith("update fiat_payment_sessions set stripe_status=$1")) {
-                const [stripeStatus, status, _updatedAt, id] = params;
+                const [stripeStatus, status, , id] = params;
                 const sess = sessionsById.get(id);
                 if (!sess)
                     return { rowCount: 0, rows: [] };
@@ -43,7 +43,7 @@ void test("fiat/stripe: webhook handles paid/refunded/disputed and idempotency",
                 return { rowCount: 1, rows: [] };
             }
             if (q.startsWith("insert into ledger_entries")) {
-                const [_id, paymentId, amountMinor] = params;
+                const [, paymentId, amountMinor] = params;
                 const alreadyPaid = ledgerEntries.some((e) => e.payment_id === paymentId);
                 const alreadyRefunded = ledgerEntries.some((e) => e.payment_id === paymentId && e.amount_minor < 0);
                 if (amountMinor < 0) {
@@ -91,7 +91,8 @@ void test("fiat/stripe: webhook handles paid/refunded/disputed and idempotency",
     const baseUrl = `http://127.0.0.1:${addr.port}`;
     const postStripeWebhook = async (event) => {
         const payload = JSON.stringify(event);
-        const signature = stripe.webhooks.generateTestHeaderString({ payload, secret: webhookSecret });
+        const stripeWebhooks = stripe.webhooks;
+        const signature = stripeWebhooks.generateTestHeaderString({ payload, secret: webhookSecret });
         const resp = await fetch(`${baseUrl}/api/v1/fiat/payments/stripe/webhook`, {
             method: "POST",
             headers: { "content-type": "application/json", "stripe-signature": signature },
@@ -165,7 +166,7 @@ void test("fiat/stripe: reconcile updates pending sessions and writes ledger", a
                 return { rowCount: rows.length, rows };
             }
             if (q.startsWith("update fiat_payment_sessions set stripe_status=$1")) {
-                const [stripeStatus, status, _updatedAt, id] = params;
+                const [stripeStatus, status, , id] = params;
                 const sess = sessionsById.get(id);
                 if (!sess)
                     return { rowCount: 0, rows: [] };
@@ -181,7 +182,7 @@ void test("fiat/stripe: reconcile updates pending sessions and writes ledger", a
                 return { rowCount: 1, rows: [{ amount_minor: sess.amount_minor, currency: sess.currency }] };
             }
             if (q.startsWith("insert into ledger_entries")) {
-                const [_id, paymentId, amountMinor] = params;
+                const [, paymentId, amountMinor] = params;
                 const alreadyPaid = ledgerEntries.some((e) => e.payment_id === paymentId);
                 const alreadyRefunded = ledgerEntries.some((e) => e.payment_id === paymentId && e.amount_minor < 0);
                 if (amountMinor < 0) {
@@ -403,7 +404,7 @@ void test("admin/institutions: api keys and members workflows behave", async () 
                 return { rowCount: institutions.has(id) ? 1 : 0, rows: institutions.has(id) ? [{ ok: 1 }] : [] };
             }
             if (q.startsWith("insert into institution_api_keys")) {
-                const [id, institutionId, _name, keyHash, last4] = params;
+                const [id, institutionId, , keyHash, last4] = params;
                 apiKeys.set(id, { id, institution_id: institutionId, key_hash: keyHash, last4, revoked_at: null });
                 return { rowCount: 1, rows: [] };
             }

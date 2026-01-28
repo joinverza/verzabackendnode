@@ -23,6 +23,7 @@ export declare function createIdentityOrchestratorApp(opts: {
         JWT_ISSUER: string;
         CORS_ALLOWED_ORIGINS?: string[];
         METRICS_ENABLED?: boolean;
+        IDENTITY_RETENTION_DAYS?: number;
     };
     logger: ReturnType<typeof createLogger>;
     pool: ReturnType<typeof createPgPool>;

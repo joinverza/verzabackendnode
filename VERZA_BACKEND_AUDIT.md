@@ -35,16 +35,22 @@ Last updated: 2026-01-28
   - Institution API-key enforcement middleware: [requireInstitutionApiKey.test.ts](file:///c:/Users/User/Desktop/verzabackendnode/packages/auth/src/requireInstitutionApiKey.test.ts)
   - Identity gateway proxy behavior: [server.flow.test.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/identity-gateway/src/server.flow.test.ts)
   - Identity orchestrator happy path + idempotent async enqueue: [server.flow.test.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/identity-orchestrator/src/server.flow.test.ts)
+- Completed main-api ↔ identity gateway/orchestrator integration for identity verifications, with end-to-end workflow test coverage: [identityVerifications.flow.test.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/identityVerifications.flow.test.ts)
 - Hardened identity orchestrator async run response semantics (returns `202 {status:"queued"}`) in [server.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/identity-orchestrator/src/server.ts)
 - Improved OpenAPI generation by injecting request/response schemas from Zod for core auth/credentials routes in [main-api/server.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/server.ts)
 - Fixed identity-orchestrator test logger to use real pino instance (required by `pino-http`) in [server.flow.test.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/identity-orchestrator/src/server.flow.test.ts)
+- Hardened Node test execution to avoid lingering handles blocking Turborepo by adding `--test-force-exit` across package `test` scripts:
+  - [main-api/package.json](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/package.json)
+  - [identity-gateway/package.json](file:///c:/Users/User/Desktop/verzabackendnode/apps/identity-gateway/package.json)
+  - [identity-orchestrator/package.json](file:///c:/Users/User/Desktop/verzabackendnode/apps/identity-orchestrator/package.json)
+  - [auth/package.json](file:///c:/Users/User/Desktop/verzabackendnode/packages/auth/package.json)
+  - [crypto/package.json](file:///c:/Users/User/Desktop/verzabackendnode/packages/crypto/package.json)
 - Verified workspace: `npm test`, `npm run lint`, `npm run typecheck` all pass
 
 ## Next Tasks (Recommended Order)
 1. Add fiat/Stripe workflow tests (webhooks: refunds/disputes; reconciliation endpoints).
 2. Extend OpenAPI schema derivation to more routes (params, error envelopes, non-200 responses).
 3. Expand integration tests for admin surfaces and complex domain workflows.
-4. Complete identity verification integration across main-api, gateway, and orchestrator.
 
 ## Repo Layout (What Exists)
 - `apps/main-api/` — Verza API (Express). Entry: [index.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/index.ts), server: [server.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/server.ts)
@@ -281,7 +287,7 @@ High-level missing domains (currently stubbed or absent):
 - **Escrow**: implemented.
 - **Governance**: implemented.
 - **Verifications**: implemented.
-- **Identity Verifications**: user/admin/institution flows are implemented; remaining scope includes integration with identity gateway/orchestrator, async processing, and stronger state-machine semantics.
+- **Identity Verifications**: user/admin/institution flows are implemented and integrated with identity gateway/orchestrator; async processing and state-machine semantics are implemented. Remaining scope is primarily provider expansion and production hardening.
 - **Search**: implemented.
 - **Admin surface**: implemented (`/admin/bridge`, `/admin/institutions`).
 
@@ -313,7 +319,7 @@ The orchestrator now supports production-critical capabilities:
 There are workspace scripts for `lint`, `typecheck`, and `test` (see [package.json](file:///c:/Users/User/Desktop/verzabackendnode/package.json)). Workflow tests now exist for key paths:
 - Unit tests exist for 2FA backup code verification in [twofa.test.ts](file:///c:/Users/User/Desktop/verzabackendnode/packages/auth/src/twofa.test.ts).
 - Minimal auth route test exists for forgot-password behavior in [auth.test.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/auth.test.ts).
-- Integration/workflow tests exist for auth, credentials, institution API key enforcement, and identity gateway/orchestrator flows (see 2026-01-28 updates above).
+- Integration/workflow tests exist for auth, credentials, institution API key enforcement, identity verifications, and identity gateway/orchestrator flows (see 2026-01-28 updates above).
 - Remaining gaps:
   - Add tests for fiat/Stripe webhooks (refunds/disputes) and reconciliation endpoints.
   - Add broader integration coverage for admin surfaces and complex domain workflows.
@@ -344,7 +350,7 @@ There are workspace scripts for `lint`, `typecheck`, and `test` (see [package.js
 
 ### Compliance-readiness notes (what exists vs what auditors usually expect)
 - **SOC2-style controls**: logging exists, but you likely need audit logging for admin actions, access events, and key lifecycle events; plus retention policies and access controls.
-- **OWASP API Security**: authentication exists for main-api user/admin flows; however, identity internal surfaces need protection, and per-route rate limiting and abuse prevention should be tightened.
+- **OWASP API Security**: authentication exists for main-api user/admin flows and identity internal surfaces; per-route rate limiting and abuse prevention should be tightened.
 - **Secrets management**: secrets are environment-driven (good baseline) but there is no explicit rotation policy or secret scanning in repo scope.
 
 ## Database Coverage (What’s Already Modeled)

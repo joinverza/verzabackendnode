@@ -75,6 +75,34 @@ export function createHttpApp(opts: { logger: Logger; corsAllowedOrigins: string
   return app;
 }
 
+export function createRateLimiter(opts: {
+  windowMs: number;
+  limit: number;
+  message?: { code: string; message: string };
+  keyGenerator?: (req: express.Request) => string;
+  skip?: (req: express.Request) => boolean;
+}) {
+  const config = {
+    windowMs: opts.windowMs,
+    limit: opts.limit,
+    standardHeaders: true,
+    legacyHeaders: false,
+    ...(opts.skip ? { skip: opts.skip } : {}),
+    ...(opts.keyGenerator ? { keyGenerator: opts.keyGenerator } : {}),
+    handler: (req: express.Request, res: express.Response) => {
+      res.status(429).json({
+        error: {
+          code: opts.message?.code ?? "rate_limited",
+          message: opts.message?.message ?? "Too many requests",
+          details: {},
+          request_id: req.requestId || ""
+        }
+      });
+    }
+  };
+  return rateLimit(config);
+}
+
 export const notFoundHandler: RequestHandler = (req, _res, next) => {
   next(notFound("not_found", `Route not found: ${req.method} ${req.path}`));
 };

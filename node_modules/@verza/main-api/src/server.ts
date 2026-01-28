@@ -42,6 +42,9 @@ export async function createMainApiServer() {
     databaseUrl: config.DATABASE_URL,
     logger
   });
+  if (config.IDENTITY_RETENTION_DAYS && config.IDENTITY_RETENTION_DAYS > 0) {
+    await purgeMainIdentityRetention({ pool, days: config.IDENTITY_RETENTION_DAYS, logger });
+  }
 
   const app = createHttpApp({ logger, corsAllowedOrigins: config.CORS_ALLOWED_ORIGINS });
   app.disable("x-powered-by");
@@ -147,6 +150,19 @@ export async function createMainApiServer() {
       await pool.end();
     }
   };
+}
+
+async function purgeMainIdentityRetention(opts: { pool: ReturnType<typeof createPgPool>; days: number; logger: ReturnType<typeof createLogger> }) {
+  try {
+    const days = Math.max(0, Math.floor(opts.days));
+    if (!days) return;
+    await opts.pool.query(
+      "delete from identity_verifications where server_received_at < now() - ($1::int * interval '1 day') and status <> 'pending'",
+      [days]
+    );
+  } catch (err) {
+    opts.logger.error({ err }, "identity retention purge failed");
+  }
 }
 
 function buildOpenApiSpec(input: { title: string; version: string; serverUrl: string }) {

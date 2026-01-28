@@ -58,6 +58,27 @@ export function createHttpApp(opts) {
     }));
     return app;
 }
+export function createRateLimiter(opts) {
+    const config = {
+        windowMs: opts.windowMs,
+        limit: opts.limit,
+        standardHeaders: true,
+        legacyHeaders: false,
+        ...(opts.skip ? { skip: opts.skip } : {}),
+        ...(opts.keyGenerator ? { keyGenerator: opts.keyGenerator } : {}),
+        handler: (req, res) => {
+            res.status(429).json({
+                error: {
+                    code: opts.message?.code ?? "rate_limited",
+                    message: opts.message?.message ?? "Too many requests",
+                    details: {},
+                    request_id: req.requestId || ""
+                }
+            });
+        }
+    };
+    return rateLimit(config);
+}
 export const notFoundHandler = (req, _res, next) => {
     next(notFound("not_found", `Route not found: ${req.method} ${req.path}`));
 };

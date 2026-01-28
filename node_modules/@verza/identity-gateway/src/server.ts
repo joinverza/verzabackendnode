@@ -5,8 +5,9 @@ import axios from "axios";
 import type { Request } from "express";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { requireUser } from "@verza/auth";
 import { createIdentityGatewayConfig } from "@verza/config";
-import { createHttpApp, errorHandler, notFoundHandler } from "@verza/http";
+import { createHttpApp, createRateLimiter, errorHandler, notFoundHandler } from "@verza/http";
 import { createLogger } from "@verza/observability";
 import promClient from "prom-client";
 import { z } from "zod";
@@ -47,6 +48,8 @@ export function createIdentityGatewayServer() {
   }
 
   const httpClient = axios.create({ baseURL: config.ORCHESTRATOR_URL, timeout: 30_000 });
+  const auth = config.JWT_SECRET ? requireUser({ config: { JWT_SECRET: config.JWT_SECRET, JWT_ISSUER: config.JWT_ISSUER ?? "" } }) : null;
+  const limiterKey = (req: any) => (req.auth?.userId ? `u:${req.auth.userId}` : `ip:${req.ip}`);
 
   const s3 = new S3Client({
     region: config.S3_REGION,
@@ -58,15 +61,24 @@ export function createIdentityGatewayServer() {
     }
   });
 
-  app.post("/v1/sessions", (req: Request<Record<string, never>, unknown, unknown>, res, next) => {
+  app.post(
+    "/v1/sessions",
+    ...(auth ? [auth] : []),
+    createRateLimiter({ windowMs: 60_000, limit: 60, keyGenerator: limiterKey }),
+    (req: Request<Record<string, never>, unknown, unknown>, res, next) => {
     void (async () => {
       const body = sessionsSchema.parse(req.body);
       const resp = await httpClient.post("/internal/v1/sessions", body, { headers: passthroughHeaders(req.headers) });
       res.status(resp.status).json(resp.data);
     })().catch(next);
-  });
+    }
+  );
 
-  app.post("/v1/media/presign", (req: Request<Record<string, never>, unknown, unknown>, res, next) => {
+  app.post(
+    "/v1/media/presign",
+    ...(auth ? [auth] : []),
+    createRateLimiter({ windowMs: 60_000, limit: 30, keyGenerator: limiterKey }),
+    (req: Request<Record<string, never>, unknown, unknown>, res, next) => {
     void (async () => {
       const body = presignSchema.parse(req.body);
       const command = new PutObjectCommand({
@@ -77,17 +89,47 @@ export function createIdentityGatewayServer() {
       const url = await getSignedUrl(s3, command, { expiresIn: 60 });
       res.json({ url, method: "PUT", headers: { "content-type": body.content_type } });
     })().catch(next);
-  });
+    }
+  );
 
-  app.post("/v1/verifications", (req: Request<Record<string, never>, unknown, unknown>, res, next) => {
+  app.post(
+    "/v1/verifications",
+    ...(auth ? [auth] : []),
+    createRateLimiter({ windowMs: 60_000, limit: 30, keyGenerator: limiterKey }),
+    (req: Request<Record<string, never>, unknown, unknown>, res, next) => {
     void (async () => {
       const body = createVerificationSchema.parse(req.body);
       const resp = await httpClient.post("/internal/v1/verifications", body, { headers: passthroughHeaders(req.headers) });
       res.status(resp.status).json(resp.data);
     })().catch(next);
-  });
+    }
+  );
 
-  app.all("/v1/verifications/:id/*", (req: Request<{ id: string }, unknown, unknown>, res, next) => {
+  app.all(
+    "/v1/verifications/:id",
+    ...(auth ? [auth] : []),
+    createRateLimiter({ windowMs: 60_000, limit: 120, keyGenerator: limiterKey }),
+    (req: Request<{ id: string }, unknown, unknown>, res, next) => {
+      void (async () => {
+        const id = String(req.params.id);
+        const targetPath = `/internal/v1/verifications/${encodeURIComponent(id)}`;
+        const resp = await httpClient.request({
+          method: req.method,
+          url: targetPath,
+          data: req.body,
+          headers: passthroughHeaders(req.headers),
+          validateStatus: () => true
+        });
+        res.status(resp.status).json(resp.data);
+      })().catch(next);
+    }
+  );
+
+  app.all(
+    "/v1/verifications/:id/*",
+    ...(auth ? [auth] : []),
+    createRateLimiter({ windowMs: 60_000, limit: 120, keyGenerator: limiterKey }),
+    (req: Request<{ id: string }, unknown, unknown>, res, next) => {
     void (async () => {
       const id = String(req.params.id);
       const paramsAny = req.params as unknown as Record<string, string | undefined>;
@@ -102,7 +144,8 @@ export function createIdentityGatewayServer() {
       });
       res.status(resp.status).json(resp.data);
     })().catch(next);
-  });
+    }
+  );
 
   app.use(notFoundHandler);
   app.use(errorHandler());
@@ -129,5 +172,7 @@ function passthroughHeaders(headers: Record<string, unknown>): Record<string, st
   if (traceparent) out.traceparent = traceparent;
   const auth = typeof headers.authorization === "string" ? headers.authorization : undefined;
   if (auth) out.authorization = auth;
+  const idem = typeof headers["idempotency-key"] === "string" ? headers["idempotency-key"] : undefined;
+  if (idem) out["idempotency-key"] = idem;
   return out;
 }

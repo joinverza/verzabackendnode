@@ -1,4 +1,38 @@
 
 > test
-> node -e "process.exit(0)"
+> node --test --test-force-exit dist/**/*.test.js
 
+TAP version 13
+# Subtest: verifyDidSignedRequest accepts a valid did:jwk signature
+ok 1 - verifyDidSignedRequest accepts a valid did:jwk signature
+  ---
+  duration_ms: 14.8932
+  type: 'test'
+  ...
+# Subtest: verifyDidSignedRequest rejects mismatched body
+ok 2 - verifyDidSignedRequest rejects mismatched body
+  ---
+  duration_ms: 5.31
+  type: 'test'
+  ...
+# Subtest: verifyDidSignedRequest rejects old timestamps
+ok 3 - verifyDidSignedRequest rejects old timestamps
+  ---
+  duration_ms: 1.1321
+  type: 'test'
+  ...
+# Subtest: verifyDidSignedRequest rejects future timestamps
+ok 4 - verifyDidSignedRequest rejects future timestamps
+  ---
+  duration_ms: 4.7838
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 264.5694

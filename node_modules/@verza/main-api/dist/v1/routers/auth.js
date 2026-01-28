@@ -5,7 +5,7 @@ import nodemailer from "nodemailer";
 import { z } from "zod";
 import { createAccessToken, generateRefreshToken, requireUser } from "@verza/auth";
 import { sha256Hex } from "@verza/crypto";
-import { badRequest, unauthorized } from "@verza/http";
+import { badRequest, createRateLimiter, unauthorized } from "@verza/http";
 export const signupSchema = z.object({
     email: z.string().email(),
     password: z.string().min(8),
@@ -46,7 +46,7 @@ function randomUuid() {
 }
 export function createAuthRouter(ctx) {
     const router = express.Router();
-    router.post("/signup", async (req, res, next) => {
+    router.post("/signup", createRateLimiter({ windowMs: 60_000, limit: 10 }), async (req, res, next) => {
         try {
             const body = signupSchema.parse(req.body);
             const existing = await ctx.pool.query("select id from users where email=$1 limit 1", [
@@ -76,7 +76,7 @@ export function createAuthRouter(ctx) {
             next(err);
         }
     });
-    router.post("/login", async (req, res, next) => {
+    router.post("/login", createRateLimiter({ windowMs: 60_000, limit: 20 }), async (req, res, next) => {
         try {
             const body = loginSchema.parse(req.body);
             const result = await ctx.pool.query("select id,email,password_hash,role,twofa_enabled,twofa_secret,backup_codes_sha from users where email=$1 limit 1", [body.email.toLowerCase()]);
@@ -125,7 +125,7 @@ export function createAuthRouter(ctx) {
             next(err);
         }
     });
-    router.post("/refresh", async (req, res, next) => {
+    router.post("/refresh", createRateLimiter({ windowMs: 60_000, limit: 60 }), async (req, res, next) => {
         try {
             const body = refreshSchema.parse(req.body);
             const refreshHash = sha256Hex(body.refresh_token);
@@ -157,7 +157,7 @@ export function createAuthRouter(ctx) {
             next(err);
         }
     });
-    router.post("/forgot-password", async (req, res, next) => {
+    router.post("/forgot-password", createRateLimiter({ windowMs: 60_000, limit: 5 }), async (req, res, next) => {
         try {
             const body = forgotPasswordSchema.parse(req.body);
             const email = body.email ? body.email.toLowerCase() : null;
@@ -185,7 +185,7 @@ export function createAuthRouter(ctx) {
             next(err);
         }
     });
-    router.post("/reset-password", async (req, res, next) => {
+    router.post("/reset-password", createRateLimiter({ windowMs: 60_000, limit: 10 }), async (req, res, next) => {
         try {
             const body = resetPasswordSchema.parse(req.body);
             const tokenHash = sha256Hex(body.token);

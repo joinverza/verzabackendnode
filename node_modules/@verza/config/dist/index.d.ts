@@ -15,9 +15,11 @@ export declare function createMainApiConfig(env: NodeJS.ProcessEnv): {
     REFRESH_TOKEN_TTL_SECONDS: number;
     ENCRYPTION_MASTER_KEY_B64: string;
     RECEIPT_ED25519_SEED_B64: string;
+    IDENTITY_RETENTION_DAYS: number;
     SMTP_SECURE: boolean;
     NODE_ENV?: string | undefined;
     REDIS_URL?: string | undefined;
+    IDENTITY_GATEWAY_URL?: string | undefined;
     PASSWORD_RESET_BASE_URL?: string | undefined;
     SMTP_HOST?: string | undefined;
     SMTP_PORT?: number | undefined;
@@ -36,6 +38,7 @@ export declare function createIdentityGatewayConfig(env: NodeJS.ProcessEnv): {
     LOG_LEVEL: string;
     METRICS_ENABLED: boolean;
     CORS_ALLOWED_ORIGINS: string[];
+    JWT_ISSUER: string;
     ORCHESTRATOR_URL: string;
     S3_ENDPOINT: string;
     S3_ACCESS_KEY_ID: string;
@@ -44,6 +47,7 @@ export declare function createIdentityGatewayConfig(env: NodeJS.ProcessEnv): {
     S3_REGION: string;
     S3_FORCE_PATH_STYLE: boolean;
     NODE_ENV?: string | undefined;
+    JWT_SECRET?: string | undefined;
 };
 export declare function createIdentityOrchestratorConfig(env: NodeJS.ProcessEnv): {
     HOST: string;
@@ -53,6 +57,7 @@ export declare function createIdentityOrchestratorConfig(env: NodeJS.ProcessEnv)
     CORS_ALLOWED_ORIGINS: string[];
     JWT_SECRET: string;
     JWT_ISSUER: string;
+    IDENTITY_RETENTION_DAYS: number;
     S3_FORCE_PATH_STYLE: boolean;
     IDENTITY_DATABASE_URL: string;
     INFERENCE_URL: string;

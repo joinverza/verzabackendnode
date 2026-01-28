@@ -20,6 +20,9 @@ export async function createMainApiServer() {
         databaseUrl: config.DATABASE_URL,
         logger
     });
+    if (config.IDENTITY_RETENTION_DAYS && config.IDENTITY_RETENTION_DAYS > 0) {
+        await purgeMainIdentityRetention({ pool, days: config.IDENTITY_RETENTION_DAYS, logger });
+    }
     const app = createHttpApp({ logger, corsAllowedOrigins: config.CORS_ALLOWED_ORIGINS });
     app.disable("x-powered-by");
     app.use((req, res, next) => {
@@ -118,6 +121,17 @@ export async function createMainApiServer() {
             await pool.end();
         }
     };
+}
+async function purgeMainIdentityRetention(opts) {
+    try {
+        const days = Math.max(0, Math.floor(opts.days));
+        if (!days)
+            return;
+        await opts.pool.query("delete from identity_verifications where server_received_at < now() - ($1::int * interval '1 day') and status <> 'pending'", [days]);
+    }
+    catch (err) {
+        opts.logger.error({ err }, "identity retention purge failed");
+    }
 }
 function buildOpenApiSpec(input) {
     return {
@@ -595,6 +609,7 @@ function enhanceOpenApiFromZod(openapi) {
         "post /api/v1/fiat/payments/reconcile": { responses: { "200": reconcileResponseSchema, "501": notConfiguredResponseSchema } }
     };
     const errorEnvelopeJsonSchema = stripJsonSchemaMeta(zodToJsonSchema(errorEnvelopeSchema));
+    const isRecord = (v) => !!v && typeof v === "object" && !Array.isArray(v);
     const ensureErrorResponses = (op) => {
         op.responses ??= {};
         for (const status of ["400", "401", "403", "404", "500"]) {
@@ -604,17 +619,27 @@ function enhanceOpenApiFromZod(openapi) {
         }
     };
     const addParamsFromZodObject = (op, input) => {
-        const jsonSchema = stripJsonSchemaMeta(zodToJsonSchema(input.zodSchema));
-        const properties = jsonSchema?.properties;
-        if (!properties || typeof properties !== "object")
+        const jsonSchemaUnknown = stripJsonSchemaMeta(zodToJsonSchema(input.zodSchema));
+        if (!isRecord(jsonSchemaUnknown))
             return;
-        const required = Array.isArray(jsonSchema.required) ? jsonSchema.required : [];
+        const propertiesUnknown = jsonSchemaUnknown.properties;
+        if (!isRecord(propertiesUnknown))
+            return;
+        const required = Array.isArray(jsonSchemaUnknown.required)
+            ? jsonSchemaUnknown.required.filter((x) => typeof x === "string")
+            : [];
         op.parameters ??= [];
         const existing = Array.isArray(op.parameters) ? op.parameters : [];
         const existingNames = new Set(existing
-            .map((p) => (p && typeof p === "object" ? `${String(p.in ?? "")}:${String(p.name ?? "")}` : ""))
+            .map((p) => {
+            if (!isRecord(p))
+                return "";
+            const inValue = typeof p.in === "string" ? p.in : "";
+            const nameValue = typeof p.name === "string" ? p.name : "";
+            return `${inValue}:${nameValue}`;
+        })
             .filter((s) => s.length));
-        for (const [name, schema] of Object.entries(properties)) {
+        for (const [name, schema] of Object.entries(propertiesUnknown)) {
             const key = `${input.in}:${name}`;
             if (existingNames.has(key))
                 continue;
@@ -670,7 +695,13 @@ function enhanceOpenApiFromZod(openapi) {
             op.parameters ??= [];
             const existing = Array.isArray(op.parameters) ? op.parameters : [];
             const existingNames = new Set(existing
-                .map((p) => (p && typeof p === "object" ? `${String(p.in ?? "")}:${String(p.name ?? "")}` : ""))
+                .map((p) => {
+                if (!isRecord(p))
+                    return "";
+                const inValue = typeof p.in === "string" ? p.in : "";
+                const nameValue = typeof p.name === "string" ? p.name : "";
+                return `${inValue}:${nameValue}`;
+            })
                 .filter((s) => s.length));
             for (const name of pathParams) {
                 const key = `path:${name}`;

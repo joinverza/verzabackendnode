@@ -8,7 +8,7 @@ import promClient from "prom-client";
 import { requireUser } from "@verza/auth";
 import { createIdentityOrchestratorConfig } from "@verza/config";
 import { createPgPool, migrateDatabase } from "@verza/db";
-import { badRequest, createHttpApp, errorHandler, notFound, notFoundHandler } from "@verza/http";
+import { badRequest, createHttpApp, createRateLimiter, errorHandler, notFound, notFoundHandler } from "@verza/http";
 import { createLogger } from "@verza/observability";
 const createSessionSchema = z.object({
     user_id: z.string().uuid().optional()
@@ -31,6 +31,9 @@ export async function createIdentityOrchestratorServer() {
     const logger = createLogger({ service: "identity-orchestrator", level: config.LOG_LEVEL });
     const pool = createPgPool(config.IDENTITY_DATABASE_URL);
     await migrateDatabase({ db: "identity", databaseUrl: config.IDENTITY_DATABASE_URL, logger });
+    if (config.IDENTITY_RETENTION_DAYS && config.IDENTITY_RETENTION_DAYS > 0) {
+        await purgeOrchestratorRetention({ pool, days: config.IDENTITY_RETENTION_DAYS, logger });
+    }
     const inference = axios.create({ baseURL: config.INFERENCE_URL, timeout: 60_000 });
     const s3 = createS3ClientIfConfigured(config);
     const redisUrl = config.REDIS_URL && config.REDIS_URL.trim().length ? config.REDIS_URL.trim() : null;
@@ -76,7 +79,8 @@ export function createIdentityOrchestratorApp(opts) {
     }
     const internalAuth = requireUser({ config: opts.config });
     app.use("/internal/v1", internalAuth);
-    app.post("/internal/v1/sessions", (req, res, next) => {
+    const limiterKey = (req) => (req.auth?.userId ? `u:${req.auth.userId}` : `ip:${req.ip}`);
+    app.post("/internal/v1/sessions", createRateLimiter({ windowMs: 60_000, limit: 60, keyGenerator: limiterKey }), (req, res, next) => {
         void (async () => {
             const body = createSessionSchema.parse(req.body);
             const id = crypto.randomUUID();
@@ -85,7 +89,7 @@ export function createIdentityOrchestratorApp(opts) {
             res.json({ id, user_id: userId });
         })().catch(next);
     });
-    app.post("/internal/v1/verifications", (req, res, next) => {
+    app.post("/internal/v1/verifications", createRateLimiter({ windowMs: 60_000, limit: 30, keyGenerator: limiterKey }), (req, res, next) => {
         void (async () => {
             const body = createVerificationSchema.parse(req.body);
             const id = crypto.randomUUID();
@@ -121,7 +125,7 @@ export function createIdentityOrchestratorApp(opts) {
             res.json(result.rows.map((r) => ({ ...r, data: safeJson(r.data_json) })));
         })().catch(next);
     });
-    app.post("/internal/v1/verifications/:id/media", (req, res, next) => {
+    app.post("/internal/v1/verifications/:id/media", createRateLimiter({ windowMs: 60_000, limit: 120, keyGenerator: limiterKey }), (req, res, next) => {
         void (async () => {
             const { id } = verificationIdSchema.parse(req.params);
             const body = mediaSchema.parse(req.body);
@@ -149,7 +153,7 @@ export function createIdentityOrchestratorApp(opts) {
             res.json({ status: "ok" });
         })().catch(next);
     });
-    app.post("/internal/v1/verifications/:id/run", (req, res, next) => {
+    app.post("/internal/v1/verifications/:id/run", createRateLimiter({ windowMs: 60_000, limit: 20, keyGenerator: limiterKey }), (req, res, next) => {
         void (async () => {
             const { id } = verificationIdSchema.parse(req.params);
             const asyncFlag = typeof req.query.async === "string" ? req.query.async.toLowerCase() : "";
@@ -187,7 +191,7 @@ export function createIdentityOrchestratorApp(opts) {
             res.json({ status: "completed" });
         })().catch(next);
     });
-    app.post("/internal/v1/verifications/:id/idempotency", (req, res, next) => {
+    app.post("/internal/v1/verifications/:id/idempotency", createRateLimiter({ windowMs: 60_000, limit: 120, keyGenerator: limiterKey }), (req, res, next) => {
         void (async () => {
             const { id } = verificationIdSchema.parse(req.params);
             const body = idempotencySchema.parse(req.body);
@@ -333,6 +337,18 @@ function safeJson(s) {
     }
     catch {
         return {};
+    }
+}
+async function purgeOrchestratorRetention(opts) {
+    try {
+        const days = Math.max(0, Math.floor(opts.days));
+        if (!days)
+            return;
+        await opts.pool.query("delete from identity_sessions where created_at < now() - ($1::int * interval '1 day')", [days]);
+        await opts.pool.query("delete from identity_verifications_v2 where updated_at < now() - ($1::int * interval '1 day') and status in ('completed','failed')", [days]);
+    }
+    catch (err) {
+        opts.logger.error({ err }, "identity retention purge failed");
     }
 }
 //# sourceMappingURL=server.js.map
