@@ -51,6 +51,8 @@ type RedisClient = {
   connect: () => Promise<void>;
   rPush: (key: string, value: string) => Promise<number>;
   blPop: (key: string, timeout: number) => Promise<{ key: string; element: string } | null>;
+  quit: () => Promise<void>;
+  isOpen: boolean;
 };
 
 const QUEUE_KEY = "verza:identity:jobs:v1";
@@ -62,10 +64,45 @@ export async function createIdentityOrchestratorServer() {
 
   await migrateDatabase({ db: "identity", databaseUrl: config.IDENTITY_DATABASE_URL, logger });
 
-  const app = createHttpApp({ logger, corsAllowedOrigins: config.CORS_ALLOWED_ORIGINS });
+  const inference = axios.create({ baseURL: config.INFERENCE_URL, timeout: 60_000 });
+  const s3 = createS3ClientIfConfigured(config);
+
+  const redisUrl = config.REDIS_URL && config.REDIS_URL.trim().length ? config.REDIS_URL.trim() : null;
+  const createRedisClient = createClient as unknown as (options: { url: string }) => RedisClient;
+  const redis = redisUrl ? createRedisClient({ url: redisUrl }) : null;
+
+  const app = createIdentityOrchestratorApp({ config, logger, pool, inference, redis, s3 });
+  const server = http.createServer(app);
+
+  return {
+    start: async () => {
+      if (redis && !redis.isOpen) await redis.connect();
+      await new Promise<void>((resolve) => server.listen(config.PORT, config.HOST, resolve));
+      const addr = server.address() as AddressInfo;
+      logger.info({ addr }, "identity-orchestrator listening");
+      if (redis) startWorker({ redis, pool, inference, s3, logger });
+      return addr;
+    },
+    stop: async () => {
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+      if (redis?.isOpen) await redis.quit();
+      await pool.end();
+    }
+  };
+}
+
+export function createIdentityOrchestratorApp(opts: {
+  config: { JWT_SECRET: string; JWT_ISSUER: string; CORS_ALLOWED_ORIGINS?: string[]; METRICS_ENABLED?: boolean };
+  logger: ReturnType<typeof createLogger>;
+  pool: ReturnType<typeof createPgPool>;
+  inference: ReturnType<typeof axios.create>;
+  redis: RedisClient | null;
+  s3: { client: S3Client; bucket: string } | null;
+}) {
+  const app = createHttpApp({ logger: opts.logger, corsAllowedOrigins: opts.config.CORS_ALLOWED_ORIGINS ?? [] });
   app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
 
-  if (config.METRICS_ENABLED) {
+  if (opts.config.METRICS_ENABLED) {
     const register = new promClient.Registry();
     register.setDefaultLabels({ service: "identity-orchestrator" });
     promClient.collectDefaultMetrics({ register });
@@ -79,23 +116,15 @@ export async function createIdentityOrchestratorServer() {
     });
   }
 
-  const inference = axios.create({ baseURL: config.INFERENCE_URL, timeout: 60_000 });
-
-  const internalAuth = requireUser({ config });
+  const internalAuth = requireUser({ config: opts.config });
   app.use("/internal/v1", internalAuth);
-
-  const s3 = createS3ClientIfConfigured(config);
-
-  const redisUrl = config.REDIS_URL && config.REDIS_URL.trim().length ? config.REDIS_URL.trim() : null;
-  const createRedisClient = createClient as unknown as (options: { url: string }) => RedisClient;
-  const redis = redisUrl ? createRedisClient({ url: redisUrl }) : null;
 
   app.post("/internal/v1/sessions", (req, res, next) => {
     void (async () => {
       const body = createSessionSchema.parse(req.body);
       const id = crypto.randomUUID();
       const userId = req.auth.role === "admin" ? (body.user_id ?? req.auth.userId) : req.auth.userId;
-      await pool.query("insert into identity_sessions (id, user_id, created_at) values ($1,$2,$3)", [id, userId, new Date()]);
+      await opts.pool.query("insert into identity_sessions (id, user_id, created_at) values ($1,$2,$3)", [id, userId, new Date()]);
       res.json({ id, user_id: userId });
     })().catch(next);
   });
@@ -105,11 +134,11 @@ export async function createIdentityOrchestratorServer() {
       const body = createVerificationSchema.parse(req.body);
       const id = crypto.randomUUID();
       const ts = new Date();
-      await pool.query(
+      await opts.pool.query(
         "insert into identity_verifications_v2 (id, user_id, type, subject_id, status, created_at, updated_at) values ($1,$2,$3,$4,$5,$6,$7)",
         [id, req.auth.userId, body.type, body.subject_id ?? null, "created", ts, ts]
       );
-      await pool.query("insert into identity_verification_audit_v2 (id, verification_id, type, data_json, created_at) values ($1,$2,$3,$4,$5)", [
+      await opts.pool.query("insert into identity_verification_audit_v2 (id, verification_id, type, data_json, created_at) values ($1,$2,$3,$4,$5)", [
         crypto.randomUUID(),
         id,
         "verification_created",
@@ -123,7 +152,7 @@ export async function createIdentityOrchestratorServer() {
   app.get("/internal/v1/verifications/:id", (req, res, next) => {
     void (async () => {
       const { id } = verificationIdSchema.parse(req.params);
-      const result = await pool.query<VerificationRow>(
+      const result = await opts.pool.query<VerificationRow>(
         req.auth.role === "admin"
           ? "select * from identity_verifications_v2 where id=$1 limit 1"
           : "select * from identity_verifications_v2 where id=$1 and user_id=$2 limit 1",
@@ -138,8 +167,8 @@ export async function createIdentityOrchestratorServer() {
   app.get("/internal/v1/verifications/:id/audit", (req, res, next) => {
     void (async () => {
       const { id } = verificationIdSchema.parse(req.params);
-      await assertVerificationAccess({ pool, verificationId: id, auth: req.auth });
-      const result = await pool.query<{
+      await assertVerificationAccess({ pool: opts.pool, verificationId: id, auth: req.auth });
+      const result = await opts.pool.query<{
         id: string;
         verification_id: string;
         type: string;
@@ -154,11 +183,11 @@ export async function createIdentityOrchestratorServer() {
     void (async () => {
       const { id } = verificationIdSchema.parse(req.params);
       const body = mediaSchema.parse(req.body);
-      const verification = await assertVerificationAccess({ pool, verificationId: id, auth: req.auth });
+      const verification = await assertVerificationAccess({ pool: opts.pool, verificationId: id, auth: req.auth });
       if (!["created", "collecting_media", "failed"].includes(verification.status)) {
         throw badRequest("invalid_state", "Cannot add media in current state");
       }
-      await pool.query("insert into identity_media (id, verification_id, key, kind, created_at) values ($1,$2,$3,$4,$5)", [
+      await opts.pool.query("insert into identity_media (id, verification_id, key, kind, created_at) values ($1,$2,$3,$4,$5)", [
         crypto.randomUUID(),
         id,
         body.key,
@@ -166,9 +195,9 @@ export async function createIdentityOrchestratorServer() {
         new Date()
       ]);
       if (verification.status === "created") {
-        await pool.query("update identity_verifications_v2 set status=$1, updated_at=$2 where id=$3", ["collecting_media", new Date(), id]);
+        await opts.pool.query("update identity_verifications_v2 set status=$1, updated_at=$2 where id=$3", ["collecting_media", new Date(), id]);
       }
-      await pool.query("insert into identity_verification_audit_v2 (id, verification_id, type, data_json, created_at) values ($1,$2,$3,$4,$5)", [
+      await opts.pool.query("insert into identity_verification_audit_v2 (id, verification_id, type, data_json, created_at) values ($1,$2,$3,$4,$5)", [
         crypto.randomUUID(),
         id,
         "media_added",
@@ -186,13 +215,13 @@ export async function createIdentityOrchestratorServer() {
       const isAsync = asyncFlag === "1" || asyncFlag === "true";
       const idempotencyKey = req.header("idempotency-key") ?? null;
 
-      await assertVerificationAccess({ pool, verificationId: id, auth: req.auth });
+      await assertVerificationAccess({ pool: opts.pool, verificationId: id, auth: req.auth });
 
       if (isAsync) {
         if (!idempotencyKey) throw badRequest("missing_idempotency_key", "Missing Idempotency-Key");
-        if (!redis) throw badRequest("redis_not_configured", "Async execution requires Redis");
+        if (!opts.redis) throw badRequest("redis_not_configured", "Async execution requires Redis");
 
-        const inserted = await pool.query<{ id: string }>(
+        const inserted = await opts.pool.query<{ id: string }>(
           "insert into identity_idempotency (id, verification_id, key, created_at) values ($1,$2,$3,$4) on conflict (verification_id, key) do nothing returning id",
           [crypto.randomUUID(), id, idempotencyKey, new Date()]
         );
@@ -201,13 +230,13 @@ export async function createIdentityOrchestratorServer() {
           return;
         }
 
-        const queued = await pool.query<{ id: string }>(
+        const queued = await opts.pool.query<{ id: string }>(
           "update identity_verifications_v2 set status='queued', updated_at=$1 where id=$2 and status in ('created','collecting_media','failed') returning id",
           [new Date(), id]
         );
         if (!queued.rowCount) throw badRequest("invalid_state", "Verification cannot be queued");
 
-        await pool.query("insert into identity_verification_audit_v2 (id, verification_id, type, data_json, created_at) values ($1,$2,$3,$4,$5)", [
+        await opts.pool.query("insert into identity_verification_audit_v2 (id, verification_id, type, data_json, created_at) values ($1,$2,$3,$4,$5)", [
           crypto.randomUUID(),
           id,
           "run_queued",
@@ -215,20 +244,21 @@ export async function createIdentityOrchestratorServer() {
           new Date()
         ]);
 
-        await redis.rPush(
+        await opts.redis.rPush(
           QUEUE_KEY,
           JSON.stringify({ verification_id: id, idempotency_key: idempotencyKey, requested_by: req.auth.userId, requested_at: new Date().toISOString() })
         );
+        res.status(202).json({ status: "queued" });
         return;
       }
 
-      const running = await pool.query<{ id: string }>(
+      const running = await opts.pool.query<{ id: string }>(
         "update identity_verifications_v2 set status='running', updated_at=$1 where id=$2 and status in ('created','collecting_media','failed') returning id",
         [new Date(), id]
       );
       if (!running.rowCount) throw badRequest("invalid_state", "Verification cannot be run");
 
-      await processVerificationJob({ pool, inference, s3, verificationId: id, logger });
+      await processVerificationJob({ pool: opts.pool, inference: opts.inference, s3: opts.s3, verificationId: id, logger: opts.logger });
       res.json({ status: "completed" });
     })().catch(next);
   });
@@ -237,8 +267,8 @@ export async function createIdentityOrchestratorServer() {
     void (async () => {
       const { id } = verificationIdSchema.parse(req.params);
       const body = idempotencySchema.parse(req.body);
-      await assertVerificationAccess({ pool, verificationId: id, auth: req.auth });
-      const result = await pool.query("select * from identity_idempotency where verification_id=$1 and key=$2 limit 1", [id, body.key]);
+      await assertVerificationAccess({ pool: opts.pool, verificationId: id, auth: req.auth });
+      const result = await opts.pool.query("select * from identity_idempotency where verification_id=$1 and key=$2 limit 1", [id, body.key]);
       res.json({ exists: (result.rowCount ?? 0) > 0 });
     })().catch(next);
   });
@@ -246,20 +276,7 @@ export async function createIdentityOrchestratorServer() {
   app.use(notFoundHandler);
   app.use(errorHandler());
 
-  const server = http.createServer(app);
-
-  return {
-    start: async () => {
-      if (redis) {
-        await redis.connect();
-      }
-      await new Promise<void>((resolve) => server.listen(config.PORT, config.HOST, resolve));
-      logger.info({ addr: server.address() as AddressInfo }, "identity-orchestrator listening");
-      if (redis) {
-        startWorker({ redis, pool, inference, s3, logger });
-      }
-    }
-  };
+  return app;
 }
 
 function createS3ClientIfConfigured(config: {

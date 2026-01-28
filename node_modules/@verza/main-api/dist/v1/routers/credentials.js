@@ -4,7 +4,7 @@ import { z } from "zod";
 import { decryptJson, encryptJson } from "@verza/crypto";
 import { badRequest, notFound } from "@verza/http";
 import { getOrCreateProofForCredential } from "./proofs.js";
-const storeSchema = z.object({
+export const storeSchema = z.object({
     type: z.string().min(1),
     issuer_name: z.string().optional(),
     document_number: z.string().optional(),
@@ -14,13 +14,20 @@ const storeSchema = z.object({
     notes: z.string().optional(),
     data: z.unknown()
 });
-const shareSchema = z.object({
+export const shareSchema = z.object({
     credential_id: z.string().uuid(),
     recipient_did: z.string().optional(),
     recipient: z.string().optional(),
     permission: z.string().optional(),
     purpose: z.string().optional(),
     expires_at: z.string().datetime().optional()
+});
+export const storeResponseSchema = z.object({
+    id: z.string().uuid()
+});
+export const shareResponseSchema = z.object({
+    id: z.string().uuid(),
+    token: z.string().min(1)
 });
 const credentialIdSchema = z.object({
     credentialId: z.string().uuid()

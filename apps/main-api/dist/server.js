@@ -5,7 +5,10 @@ import { createHttpApp, errorHandler, notFoundHandler } from "@verza/http";
 import { createLogger } from "@verza/observability";
 import promClient from "prom-client";
 import { createClient } from "redis";
+import { zodToJsonSchema } from "zod-to-json-schema";
 import { registerMainApiRoutes } from "./v1/routes.js";
+import { authTokensResponseSchema, forgotPasswordSchema, loginSchema, okResponseSchema, refreshSchema, resetPasswordSchema, signupSchema } from "./v1/routers/auth.js";
+import { shareResponseSchema, shareSchema, storeResponseSchema, storeSchema } from "./v1/routers/credentials.js";
 export async function createMainApiServer() {
     const config = createMainApiConfig(process.env);
     const logger = createLogger({ service: "main-api", level: config.LOG_LEVEL });
@@ -76,6 +79,7 @@ export async function createMainApiServer() {
         serverUrl: `http://localhost:${config.PORT}`
     });
     openapi.paths = mergeOpenApiPaths(discoverExpressPaths(app), openapi.paths ?? {});
+    enhanceOpenApiFromZod(openapi);
     app.get("/openapi.json", (_req, res) => {
         res.setHeader("cache-control", "no-store");
         res.setHeader("x-robots-tag", "noindex, nofollow");
@@ -561,6 +565,53 @@ function mergeOpenApiPaths(discovered, manual) {
         out[path] = { ...(out[path] ?? {}), ...ops };
     }
     return out;
+}
+function enhanceOpenApiFromZod(openapi) {
+    const paths = openapi.paths ?? {};
+    openapi.paths = paths;
+    const zodByRoute = {
+        "post /api/v1/auth/signup": { request: signupSchema, response: authTokensResponseSchema },
+        "post /api/v1/auth/login": { request: loginSchema, response: authTokensResponseSchema },
+        "post /api/v1/auth/refresh": { request: refreshSchema, response: authTokensResponseSchema },
+        "post /api/v1/auth/forgot-password": { request: forgotPasswordSchema, response: okResponseSchema },
+        "post /api/v1/auth/reset-password": { request: resetPasswordSchema, response: okResponseSchema },
+        "post /api/v1/auth/logout": { response: okResponseSchema },
+        "post /api/v1/credentials/store": { request: storeSchema, response: storeResponseSchema },
+        "post /api/v1/credentials/share": { request: shareSchema, response: shareResponseSchema }
+    };
+    for (const [key, zod] of Object.entries(zodByRoute)) {
+        const [method, path] = key.split(" ", 2);
+        const ops = paths[path];
+        if (!ops)
+            continue;
+        const op = ops[method];
+        if (!op || typeof op !== "object")
+            continue;
+        if (zod.request && !op.requestBody) {
+            const jsonSchema = zodToJsonSchema(zod.request);
+            const schema = typeof jsonSchema === "object" && jsonSchema ? stripJsonSchemaMeta(jsonSchema) : {};
+            op.requestBody = {
+                required: true,
+                content: {
+                    "application/json": { schema }
+                }
+            };
+        }
+        if (zod.response) {
+            op.responses ??= {};
+            op.responses["200"] ??= { description: "OK" };
+            op.responses["200"].content ??= {};
+            if (!op.responses["200"].content["application/json"]) {
+                const jsonSchema = zodToJsonSchema(zod.response);
+                const schema = typeof jsonSchema === "object" && jsonSchema ? stripJsonSchemaMeta(jsonSchema) : {};
+                op.responses["200"].content["application/json"] = { schema };
+            }
+        }
+    }
+}
+function stripJsonSchemaMeta(schema) {
+    const { $schema: _s, ...rest } = schema ?? {};
+    return rest;
 }
 function discoverExpressPaths(app) {
     const out = {};

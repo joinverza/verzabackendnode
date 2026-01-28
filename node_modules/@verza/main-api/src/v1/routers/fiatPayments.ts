@@ -118,21 +118,37 @@ export function createFiatPaymentsRouter(ctx: MainApiContext): Router {
       const raw = req.bodyRaw ?? Buffer.from("");
       const event = stripe.webhooks.constructEvent(raw, sig, secret);
 
-      const pi = event.data.object as Stripe.PaymentIntent;
-      const paymentIntentId = typeof pi?.id === "string" ? pi.id : null;
-      if (!paymentIntentId) return res.json({ status: "ok" });
+      const eventId = typeof event.id === "string" ? event.id : "";
+      const paymentIntentId = await resolvePaymentIntentIdForStripeEvent(stripe, event);
 
-      const mapped = mapStripePaymentIntentStatus({ eventType: event.type, status: pi.status });
       await ctx.pool.query("begin");
       try {
+        if (eventId) {
+          const ins = await ctx.pool.query(
+            "insert into stripe_webhook_events (id, type, stripe_payment_intent_id, created_at) values ($1,$2,$3,$4) on conflict (id) do nothing",
+            [eventId, event.type, paymentIntentId ?? "", new Date()]
+          );
+          if (!ins.rowCount) {
+            await ctx.pool.query("commit");
+            return res.json({ status: "ok" });
+          }
+        }
+
+        if (!paymentIntentId) {
+          await ctx.pool.query("commit");
+          return res.json({ status: "ok" });
+        }
+
         const sess = await ctx.pool.query<{ id: string; amount_minor: string | number; currency: string }>(
           "select id, amount_minor, currency from fiat_payment_sessions where stripe_payment_intent_id=$1 limit 1",
           [paymentIntentId]
         );
         const row = sess.rows[0];
         if (row) {
+          const mapped = mapStripeEventToPaymentStatus(event);
+          const stripeStatus = extractStripeStatusString(event);
           await ctx.pool.query("update fiat_payment_sessions set stripe_status=$1, status=$2, updated_at=$3 where id=$4", [
-            pi.status ?? "",
+            stripeStatus,
             mapped,
             new Date(),
             row.id
@@ -143,6 +159,13 @@ export function createFiatPaymentsRouter(ctx: MainApiContext): Router {
               [crypto.randomUUID(), row.id, row.amount_minor, row.currency, paymentIntentId, new Date()]
             );
           }
+          if (mapped === "refunded") {
+            const amount = -Math.abs(extractRefundAmountMinor(event) ?? Number(row.amount_minor));
+            await ctx.pool.query(
+              "insert into ledger_entries (id, payment_id, amount_minor, currency, stripe_payment_intent_id, created_at) select $1,$2,$3,$4,$5,$6 where not exists (select 1 from ledger_entries where payment_id=$2 and amount_minor < 0)",
+              [crypto.randomUUID(), row.id, amount, row.currency, paymentIntentId, new Date()]
+            );
+          }
         }
         await ctx.pool.query("commit");
       } catch (err) {
@@ -150,7 +173,7 @@ export function createFiatPaymentsRouter(ctx: MainApiContext): Router {
         throw err;
       }
 
-      res.json({ status: "ok" });
+      return res.json({ status: "ok" });
     } catch (err) {
       next(err);
     }
@@ -166,8 +189,8 @@ export function createFiatPaymentsRouter(ctx: MainApiContext): Router {
       for (const row of result.rows) {
         const piId = row.stripe_payment_intent_id;
         if (!piId) continue;
-        const pi = await stripe.paymentIntents.retrieve(piId);
-        const mapped = mapStripePaymentIntentStatus({ eventType: null, status: pi.status });
+        const pi = await stripe.paymentIntents.retrieve(piId, { expand: ["charges.data"] });
+        const mapped = mapStripePaymentIntentReconciledStatus(pi);
         await ctx.pool.query("begin");
         try {
           await ctx.pool.query("update fiat_payment_sessions set stripe_status=$1, status=$2, updated_at=$3 where id=$4", [
@@ -186,6 +209,19 @@ export function createFiatPaymentsRouter(ctx: MainApiContext): Router {
               await ctx.pool.query(
                 "insert into ledger_entries (id, payment_id, amount_minor, currency, stripe_payment_intent_id, created_at) select $1,$2,$3,$4,$5,$6 where not exists (select 1 from ledger_entries where payment_id=$2)",
                 [crypto.randomUUID(), row.id, s.amount_minor, s.currency, piId, new Date()]
+              );
+            }
+          }
+          if (mapped === "refunded") {
+            const sess = await ctx.pool.query<{ amount_minor: string | number; currency: string }>(
+              "select amount_minor, currency from fiat_payment_sessions where id=$1 limit 1",
+              [row.id]
+            );
+            const s = sess.rows[0];
+            if (s) {
+              await ctx.pool.query(
+                "insert into ledger_entries (id, payment_id, amount_minor, currency, stripe_payment_intent_id, created_at) select $1,$2,$3,$4,$5,$6 where not exists (select 1 from ledger_entries where payment_id=$2 and amount_minor < 0)",
+                [crypto.randomUUID(), row.id, -Math.abs(Number(s.amount_minor)), s.currency, piId, new Date()]
               );
             }
           }
@@ -217,4 +253,69 @@ function mapStripePaymentIntentStatus(input: { eventType: string | null; status:
   if (s === "requires_confirmation" || s === "requires_action" || s === "requires_capture") return "processing";
   if (s === "requires_payment_method") return "initiated";
   return "initiated";
+}
+
+function mapStripeEventToPaymentStatus(event: Stripe.Event) {
+  if (event.type === "charge.refunded") return "refunded";
+  if (event.type === "charge.dispute.created" || event.type === "charge.dispute.updated") return "disputed";
+  if (event.type === "charge.dispute.closed") {
+    const dispute = event.data.object;
+    const st = typeof dispute.status === "string" ? dispute.status : "";
+    if (st === "won") return "paid";
+    if (st === "lost") return "failed";
+    return "disputed";
+  }
+  const pi = event.data.object as Stripe.PaymentIntent;
+  return mapStripePaymentIntentStatus({ eventType: event.type, status: pi?.status });
+}
+
+function extractStripeStatusString(event: Stripe.Event) {
+  if (event.type.startsWith("payment_intent.")) {
+    const pi = event.data.object as Stripe.PaymentIntent;
+    return String(pi?.status ?? "");
+  }
+  if (event.type.startsWith("charge.")) {
+    const charge = event.data.object as Stripe.Charge;
+    if (event.type === "charge.refunded") return "refunded";
+    return String(charge?.status ?? "");
+  }
+  if (event.type.startsWith("charge.dispute.")) {
+    const dispute = event.data.object as Stripe.Dispute;
+    return String(dispute?.status ?? "");
+  }
+  return "";
+}
+
+function extractRefundAmountMinor(event: Stripe.Event) {
+  if (event.type !== "charge.refunded") return null;
+  const charge = event.data.object;
+  return typeof charge.amount_refunded === "number" ? charge.amount_refunded : null;
+}
+
+async function resolvePaymentIntentIdForStripeEvent(stripe: Stripe, event: Stripe.Event) {
+  if (event.type.startsWith("payment_intent.")) {
+    const pi = event.data.object as Stripe.PaymentIntent;
+    return typeof pi?.id === "string" ? pi.id : null;
+  }
+  if (event.type.startsWith("charge.")) {
+    const charge = event.data.object as Stripe.Charge;
+    return typeof charge?.payment_intent === "string" ? charge.payment_intent : null;
+  }
+  if (event.type.startsWith("charge.dispute.")) {
+    const dispute = event.data.object as Stripe.Dispute;
+    const piId = (dispute as any)?.payment_intent;
+    if (typeof piId === "string") return piId;
+    const chargeId = typeof dispute.charge === "string" ? dispute.charge : null;
+    if (!chargeId) return null;
+    const charge = await stripe.charges.retrieve(chargeId);
+    return typeof charge?.payment_intent === "string" ? charge.payment_intent : null;
+  }
+  return null;
+}
+
+function mapStripePaymentIntentReconciledStatus(pi: Stripe.PaymentIntent) {
+  const charges = (pi as any)?.charges?.data as Stripe.Charge[] | undefined;
+  const charge = Array.isArray(charges) ? charges[0] : undefined;
+  if (charge && typeof charge.amount_refunded === "number" && charge.amount_refunded > 0) return "refunded";
+  return mapStripePaymentIntentStatus({ eventType: null, status: pi.status });
 }

@@ -113,6 +113,10 @@ export function createIdentityGatewayServer() {
     start: async () => {
       await new Promise<void>((resolve) => server.listen(config.PORT, config.HOST, resolve));
       logger.info({ addr: server.address() as AddressInfo }, "identity-gateway listening");
+      return server.address() as AddressInfo;
+    },
+    stop: async () => {
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     }
   };
 }

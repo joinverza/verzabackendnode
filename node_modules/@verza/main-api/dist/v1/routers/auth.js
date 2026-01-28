@@ -6,29 +6,37 @@ import { z } from "zod";
 import { createAccessToken, generateRefreshToken, requireUser } from "@verza/auth";
 import { sha256Hex } from "@verza/crypto";
 import { badRequest, unauthorized } from "@verza/http";
-const signupSchema = z.object({
+export const signupSchema = z.object({
     email: z.string().email(),
     password: z.string().min(8),
     name: z.string().min(1)
 });
-const loginSchema = z.object({
+export const loginSchema = z.object({
     email: z.string().email(),
     password: z.string().min(8),
     twofa_code: z.string().optional(),
     backup_code: z.string().optional()
 });
-const refreshSchema = z.object({
+export const refreshSchema = z.object({
     refresh_token: z.string().min(10)
 });
-const forgotPasswordSchema = z
+export const forgotPasswordSchema = z
     .object({
     email: z.string().email().optional(),
     phone: z.string().min(6).optional()
 })
     .refine((v) => Boolean(v.email) || Boolean(v.phone), { message: "email or phone required" });
-const resetPasswordSchema = z.object({
+export const resetPasswordSchema = z.object({
     token: z.string().min(10),
     new_password: z.string().min(8)
+});
+export const authTokensResponseSchema = z.object({
+    user: z.object({ id: z.string().uuid() }),
+    access_token: z.string().min(1),
+    refresh_token: z.string().min(1)
+});
+export const okResponseSchema = z.object({
+    status: z.literal("ok")
 });
 function now() {
     return new Date();

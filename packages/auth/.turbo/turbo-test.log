@@ -3,24 +3,36 @@
 > node --test dist/**/*.test.js
 
 TAP version 13
-# Subtest: verifyTwoFactorOrThrow returns used backup code hash when valid
-ok 1 - verifyTwoFactorOrThrow returns used backup code hash when valid
+# Subtest: requireInstitutionApiKey: missing key returns 401
+ok 1 - requireInstitutionApiKey: missing key returns 401
   ---
-  duration_ms: 5.33
+  duration_ms: 337.1828
+  type: 'test'
+  ...
+# Subtest: requireInstitutionApiKey: valid key sets req.institution
+ok 2 - requireInstitutionApiKey: valid key sets req.institution
+  ---
+  duration_ms: 61.4484
+  type: 'test'
+  ...
+# Subtest: verifyTwoFactorOrThrow returns used backup code hash when valid
+ok 3 - verifyTwoFactorOrThrow returns used backup code hash when valid
+  ---
+  duration_ms: 5.2901
   type: 'test'
   ...
 # Subtest: verifyTwoFactorOrThrow throws invalid_twofa on bad codes
-ok 2 - verifyTwoFactorOrThrow throws invalid_twofa on bad codes
+ok 4 - verifyTwoFactorOrThrow throws invalid_twofa on bad codes
   ---
-  duration_ms: 4.2052
+  duration_ms: 1.9234
   type: 'test'
   ...
-1..2
-# tests 2
+1..4
+# tests 4
 # suites 0
-# pass 2
+# pass 4
 # fail 0
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 1322.1611
+# duration_ms 2427.7984

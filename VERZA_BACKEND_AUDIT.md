@@ -1,10 +1,10 @@
 # Verza Backend Monorepo Audit (Current State)
-Last updated: 2026-01-27
+Last updated: 2026-01-28
 
 ## Executive Summary
 - The repository is a Turborepo-based Node.js + TypeScript monorepo with three Node services (`main-api`, `identity-gateway`, `identity-orchestrator`) and one Python service (`inference`).
 - Core platform foundations are present (config parsing, HTTP middleware, error envelope, logging, Postgres migrations, JWT + API-key auth, crypto utilities).
-- `main-api` implements auth, “me”, notifications, credentials storage/shares, fiat-payments (partial), plus functional enterprise surfaces for **consents**, **verifiers**, **identity verifications**, **proofs**, **escrow**, **governance**, **verifications**, **search**, and the **admin surface** (`/admin/bridge`, `/admin/institutions`).
+- `main-api` implements auth, “me”, notifications, credentials storage/shares, fiat payments (Stripe webhook + reconciliation endpoint implemented; remaining scope includes deeper refunds/chargebacks coverage), plus functional enterprise surfaces for **consents**, **verifiers**, **identity verifications**, **proofs**, **escrow**, **governance**, **verifications**, **search**, and the **admin surface** (`/admin/bridge`, `/admin/institutions`).
 - Identity subsystem now enforces auth on internal endpoints and supports async execution via Redis-backed queue processing, while persisting inference outputs/decisions and validating S3/MinIO media objects when configured.
 
 ## Recent Updates (2026-01-27)
@@ -28,10 +28,23 @@ Last updated: 2026-01-27
     - [main-api/package.json](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/package.json)
     - [auth.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/auth.ts), [me.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/me.ts)
 
+## Recent Updates (2026-01-28)
+- Added workflow/integration tests:
+  - Auth signup/login/refresh/logout flow: [auth.flow.test.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/auth.flow.test.ts)
+  - Credentials encrypt/decrypt roundtrip: [credentials.flow.test.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/credentials.flow.test.ts)
+  - Institution API-key enforcement middleware: [requireInstitutionApiKey.test.ts](file:///c:/Users/User/Desktop/verzabackendnode/packages/auth/src/requireInstitutionApiKey.test.ts)
+  - Identity gateway proxy behavior: [server.flow.test.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/identity-gateway/src/server.flow.test.ts)
+  - Identity orchestrator happy path + idempotent async enqueue: [server.flow.test.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/identity-orchestrator/src/server.flow.test.ts)
+- Hardened identity orchestrator async run response semantics (returns `202 {status:"queued"}`) in [server.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/identity-orchestrator/src/server.ts)
+- Improved OpenAPI generation by injecting request/response schemas from Zod for core auth/credentials routes in [main-api/server.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/server.ts)
+- Fixed identity-orchestrator test logger to use real pino instance (required by `pino-http`) in [server.flow.test.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/identity-orchestrator/src/server.flow.test.ts)
+- Verified workspace: `npm test`, `npm run lint`, `npm run typecheck` all pass
+
 ## Next Tasks (Recommended Order)
-1. Add integration tests for auth/identity flows and admin surfaces.
-2. Generate OpenAPI from code to reduce spec drift (beyond path discovery).
-3. Harden fiat payments (Stripe event idempotency, refunds/chargebacks, richer reconciliation).
+1. Add fiat/Stripe workflow tests (webhooks: refunds/disputes; reconciliation endpoints).
+2. Extend OpenAPI schema derivation to more routes (params, error envelopes, non-200 responses).
+3. Expand integration tests for admin surfaces and complex domain workflows.
+4. Complete identity verification integration across main-api, gateway, and orchestrator.
 
 ## Repo Layout (What Exists)
 - `apps/main-api/` — Verza API (Express). Entry: [index.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/index.ts), server: [server.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/server.ts)
@@ -256,7 +269,7 @@ Implemented in [inference/app.py](file:///c:/Users/User/Desktop/verzabackendnode
 - None identified in the previously stubbed set; remaining gaps are primarily scope/completeness and production hardening.
 
 ### OpenAPI is hybrid (partially hand-authored)
-- `main-api` serves OpenAPI and Swagger UI, but the spec is still partly hand-authored, and route discovery mainly reduces drift on route presence rather than request/response schema completeness.
+- `main-api` serves OpenAPI and Swagger UI; the spec is still partly hand-authored. Runtime route discovery reduces drift on route presence, and request/response schema injection exists for core auth/credentials routes, but broader schema coverage and error response modeling remains incomplete.
 
 ## What Must Be Added To Make The Project “Complete”
 This section is anchored to the required scope described in [NODE_MONOREPO_IMPLEMENTATION_PROMPT.md](file:///c:/Users/User/Desktop/verzabackendnode/NODE_MONOREPO_IMPLEMENTATION_PROMPT.md). The current codebase implements only a subset of that API surface and business logic.
@@ -297,13 +310,14 @@ The orchestrator now supports production-critical capabilities:
 - **Object storage integration**: implemented via `HeadObject` validation when S3/MinIO is configured.
 
 ### 4) Tests
-There are workspace scripts for `lint`, `typecheck`, and `test` (see [package.json](file:///c:/Users/User/Desktop/verzabackendnode/package.json)), but critical workflow tests are not present in the code reviewed:
+There are workspace scripts for `lint`, `typecheck`, and `test` (see [package.json](file:///c:/Users/User/Desktop/verzabackendnode/package.json)). Workflow tests now exist for key paths:
 - Unit tests exist for 2FA backup code verification in [twofa.test.ts](file:///c:/Users/User/Desktop/verzabackendnode/packages/auth/src/twofa.test.ts).
 - Minimal auth route test exists for forgot-password behavior in [auth.test.ts](file:///c:/Users/User/Desktop/verzabackendnode/apps/main-api/src/v1/routers/auth.test.ts).
+- Integration/workflow tests exist for auth, credentials, institution API key enforcement, and identity gateway/orchestrator flows (see 2026-01-28 updates above).
 - Remaining gaps:
-  - Add unit tests for crypto/auth primitives (JWT verification, DID signature verification).
-  - Add integration tests for auth + session lifecycle, credentials encryption roundtrip, and institution API-key enforcement.
-  - Add integration tests for identity gateway/orchestrator happy paths (session -> verification -> media -> run).
+  - Add tests for fiat/Stripe webhooks (refunds/disputes) and reconciliation endpoints.
+  - Add broader integration coverage for admin surfaces and complex domain workflows.
+  - Add unit tests for crypto/auth primitives (JWT verification edge cases, DID signature verification).
 
 ## Security & Compliance Assessment (Current vs Needed)
 
@@ -325,8 +339,8 @@ There are workspace scripts for `lint`, `typecheck`, and `test` (see [package.js
 
 ### High-risk gaps (should be addressed before production)
 - **TLS termination + edge headers are assumed external**: the apps do not enforce HTTPS themselves (expected at load balancer/ingress).
-- **Fiat payments need deeper payment-event coverage**: refund/chargeback paths, stronger event idempotency, and reconciliation completeness should be added.
-- **OpenAPI generation is not fully code-driven**: drift risk is reduced but not eliminated (spec schema completeness still depends on manual work).
+- **Fiat payments still need broader payment-event and reconciliation coverage**: refunds/disputes are handled, but test coverage and reconciliation completeness should be extended.
+- **OpenAPI generation is only partially code-driven**: request/response schemas are injected for core routes, but many routes still lack code-derived schemas and error response modeling.
 
 ### Compliance-readiness notes (what exists vs what auditors usually expect)
 - **SOC2-style controls**: logging exists, but you likely need audit logging for admin actions, access events, and key lifecycle events; plus retention policies and access controls.
