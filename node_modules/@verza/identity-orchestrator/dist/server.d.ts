@@ -21,6 +21,7 @@ export declare function createIdentityOrchestratorApp(opts: {
     config: {
         JWT_SECRET: string;
         JWT_ISSUER: string;
+        JWT_AUDIENCE: string;
         CORS_ALLOWED_ORIGINS?: string[];
         METRICS_ENABLED?: boolean;
         IDENTITY_RETENTION_DAYS?: number;

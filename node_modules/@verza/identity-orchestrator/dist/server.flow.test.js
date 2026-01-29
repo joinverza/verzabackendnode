@@ -9,7 +9,8 @@ void test("identity-orchestrator flow: create -> media -> run sync completes", a
     const secret = "x".repeat(32);
     const token = createAccessToken({
         secret,
-        issuer: "",
+        issuer: "verza",
+        audience: "verza",
         ttlSeconds: 900,
         claims: { sub: userId, email: "u@example.com", role: "user", sid: "s1" }
     });
@@ -158,7 +159,7 @@ void test("identity-orchestrator flow: create -> media -> run sync completes", a
     };
     const logger = createLogger({ service: "identity-orchestrator-test", level: "silent" });
     const app = createIdentityOrchestratorApp({
-        config: { JWT_SECRET: secret, JWT_ISSUER: "", CORS_ALLOWED_ORIGINS: [], METRICS_ENABLED: false },
+        config: { JWT_SECRET: secret, JWT_ISSUER: "verza", JWT_AUDIENCE: "verza", CORS_ALLOWED_ORIGINS: [], METRICS_ENABLED: false },
         logger,
         pool,
         inference,

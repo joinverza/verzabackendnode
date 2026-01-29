@@ -1,5 +1,7 @@
 import http from "node:http";
+import https from "node:https";
 import crypto from "node:crypto";
+import fs from "node:fs";
 import axios from "axios";
 import { HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { z } from "zod";
@@ -40,7 +42,7 @@ export async function createIdentityOrchestratorServer() {
     const createRedisClient = createClient;
     const redis = redisUrl ? createRedisClient({ url: redisUrl }) : null;
     const app = createIdentityOrchestratorApp({ config, logger, pool, inference, redis, s3 });
-    const server = http.createServer(app);
+    const server = createHttpOrHttpsServer(app, config);
     return {
         start: async () => {
             if (redis && !redis.isOpen)
@@ -203,6 +205,29 @@ export function createIdentityOrchestratorApp(opts) {
     app.use(notFoundHandler);
     app.use(errorHandler());
     return app;
+}
+function createHttpOrHttpsServer(app, config) {
+    const keyPath = String(config.TLS_KEY_PATH ?? "").trim();
+    const certPath = String(config.TLS_CERT_PATH ?? "").trim();
+    const caPath = String(config.TLS_CA_PATH ?? "").trim();
+    const requireClientCert = Boolean(config.TLS_REQUIRE_CLIENT_CERT);
+    if (requireClientCert && (!keyPath || !certPath)) {
+        throw new Error("TLS_REQUIRE_CLIENT_CERT requires TLS_KEY_PATH and TLS_CERT_PATH");
+    }
+    if (!keyPath || !certPath)
+        return http.createServer(app);
+    const key = fs.readFileSync(keyPath);
+    const cert = fs.readFileSync(certPath);
+    const ca = caPath ? fs.readFileSync(caPath) : undefined;
+    if (requireClientCert && !ca) {
+        throw new Error("TLS_REQUIRE_CLIENT_CERT requires TLS_CA_PATH");
+    }
+    return https.createServer({
+        key,
+        cert,
+        ...(ca ? { ca } : {}),
+        ...(requireClientCert ? { requestCert: true, rejectUnauthorized: true } : {})
+    }, app);
 }
 function createS3ClientIfConfigured(config) {
     if (!config.S3_ENDPOINT ||
