@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import test from "node:test";
 
 import express from "express";
@@ -12,7 +13,7 @@ void test("credentials: store encrypts and get decrypts roundtrip", async () => 
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    (req as any).auth = { userId: "user-1", role: "user", sessionId: "sess-1", email: "u@example.com" };
+    (req as any).auth = { userId: "user-1", role: "user", sessionId: "sess-1", email: "u@example.com", tenantId: "t-1" };
     next();
   });
 
@@ -23,10 +24,11 @@ void test("credentials: store encrypts and get decrypts roundtrip", async () => 
       const q = sql.replace(/\s+/g, " ").trim().toLowerCase();
 
       if (q.startsWith("insert into credentials")) {
-        const [id, owner_user_id, owner_did, type, status, issuer_name, document_number, issue_date, expiry_date, issuing_authority, notes, encrypted_data] =
+        const [id, tenant_id, owner_user_id, owner_did, type, status, issuer_name, document_number, issue_date, expiry_date, issuing_authority, notes, encrypted_data] =
           params as any[];
         credentialsById.set(id, {
           id,
+          tenant_id,
           owner_user_id,
           owner_did,
           type,
@@ -42,16 +44,16 @@ void test("credentials: store encrypts and get decrypts roundtrip", async () => 
         return { rowCount: 1, rows: [] };
       }
 
-      if (q.startsWith("select * from credentials where id=$1 and owner_user_id=$2")) {
-        const [id, ownerUserId] = params as [string, string];
+      if (q.startsWith("select * from credentials where id=$1 and tenant_id=$2 and owner_user_id=$3")) {
+        const [id, tenantId, ownerUserId] = params as [string, string, string];
         const row = credentialsById.get(id);
-        if (!row || row.owner_user_id !== ownerUserId) return { rowCount: 0, rows: [] };
+        if (!row || row.tenant_id !== tenantId || row.owner_user_id !== ownerUserId) return { rowCount: 0, rows: [] };
         return { rowCount: 1, rows: [row] };
       }
 
       if (q.startsWith("select id, type, status, issuer_name, document_number")) {
-        const [ownerUserId] = params as [string];
-        const rows = [...credentialsById.values()].filter((r) => r.owner_user_id === ownerUserId);
+        const [tenantId, ownerUserId] = params as [string, string];
+        const rows = [...credentialsById.values()].filter((r) => r.tenant_id === tenantId && r.owner_user_id === ownerUserId);
         return { rowCount: rows.length, rows };
       }
 
@@ -99,6 +101,34 @@ void test("credentials: store encrypts and get decrypts roundtrip", async () => 
   assert.equal(get.status, 200);
   const getBody = (await get.json()) as any;
   assert.deepEqual(getBody.data, payload.data);
+
+  const otherTenantCredentialId = crypto.randomUUID();
+  credentialsById.set(otherTenantCredentialId, {
+    id: otherTenantCredentialId,
+    tenant_id: "t-2",
+    owner_user_id: "user-1",
+    owner_did: "",
+    type: "passport",
+    status: "active",
+    issuer_name: "",
+    document_number: "",
+    issue_date: null,
+    expiry_date: null,
+    issuing_authority: "",
+    notes: "",
+    encrypted_data: rawRow.encrypted_data,
+    created_at: new Date(),
+    updated_at: new Date()
+  });
+
+  const list = await fetch(`${baseUrl}/`, { method: "GET" });
+  assert.equal(list.status, 200);
+  const listBody = (await list.json()) as any[];
+  assert.equal(listBody.length, 1);
+  assert.equal(listBody[0]?.id, storeBody.id);
+
+  const getOtherTenant = await fetch(`${baseUrl}/${otherTenantCredentialId}`, { method: "GET" });
+  assert.equal(getOtherTenant.status, 404);
 
   await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
 });

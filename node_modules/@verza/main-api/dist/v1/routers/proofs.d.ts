@@ -2,6 +2,7 @@ import type { Router } from "express";
 import type { MainApiContext } from "../routes.js";
 export declare function createProofsRouter(ctx: MainApiContext): Router;
 export declare function getOrCreateProofForCredential(ctx: MainApiContext, opts: {
+    tenantId: string;
     userId: string;
     credentialId: string;
     type?: string;

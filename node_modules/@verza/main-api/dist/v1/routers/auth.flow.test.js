@@ -21,13 +21,15 @@ void test("auth flow: signup -> login -> refresh -> logout", async () => {
                 return { rowCount: u ? 1 : 0, rows: u ? [{ id: u.id }] : [] };
             }
             if (q.startsWith("insert into users")) {
-                const [id, email, name, password_hash] = params;
+                const [id, tenant_id, email, name, password_hash] = params;
                 const row = {
                     id,
+                    tenant_id,
                     email,
                     name,
                     password_hash,
                     role: "user",
+                    status: "active",
                     twofa_enabled: false,
                     twofa_secret: "",
                     backup_codes_sha: "[]"
@@ -43,7 +45,7 @@ void test("auth flow: signup -> login -> refresh -> logout", async () => {
                 sessionsByRefreshHash.set(refresh_token_hash, row);
                 return { rowCount: 1, rows: [] };
             }
-            if (q.startsWith("select id,email,password_hash,role,twofa_enabled,twofa_secret,backup_codes_sha from users where email=$1")) {
+            if (q.startsWith("select id,tenant_id,email,password_hash,role,twofa_enabled,twofa_secret,backup_codes_sha from users where email=$1")) {
                 const email = typeof params[0] === "string" ? params[0] : "";
                 const u = usersByEmail.get(email);
                 return { rowCount: u ? 1 : 0, rows: u ? [u] : [] };
@@ -51,7 +53,7 @@ void test("auth flow: signup -> login -> refresh -> logout", async () => {
             if (q.startsWith("update users set last_login_at=$1")) {
                 return { rowCount: 1, rows: [] };
             }
-            if (q.startsWith("select s.id, s.user_id, s.expires_at, s.revoked_at, u.role, u.email from sessions s join users u")) {
+            if (q.startsWith("select s.id, s.user_id, s.expires_at, s.revoked_at, u.role, u.email, u.tenant_id from sessions s join users u")) {
                 const refreshHash = typeof params[0] === "string" ? params[0] : "";
                 const s = sessionsByRefreshHash.get(refreshHash);
                 if (!s)
@@ -59,7 +61,10 @@ void test("auth flow: signup -> login -> refresh -> logout", async () => {
                 const u = usersById.get(s.user_id);
                 if (!u)
                     return { rowCount: 0, rows: [] };
-                return { rowCount: 1, rows: [{ id: s.id, user_id: s.user_id, expires_at: s.expires_at, revoked_at: s.revoked_at, role: u.role, email: u.email }] };
+                return {
+                    rowCount: 1,
+                    rows: [{ id: s.id, user_id: s.user_id, expires_at: s.expires_at, revoked_at: s.revoked_at, role: u.role, email: u.email, tenant_id: u.tenant_id }]
+                };
             }
             if (q.startsWith("update sessions set refresh_token_hash=$1")) {
                 const [newHash, newExpiresAt, id] = params;
@@ -108,7 +113,8 @@ void test("auth flow: signup -> login -> refresh -> logout", async () => {
         logger,
         config: {
             JWT_SECRET: "x".repeat(32),
-            JWT_ISSUER: "",
+            JWT_ISSUER: "verza",
+            JWT_AUDIENCE: "verza",
             ACCESS_TOKEN_TTL_SECONDS: 900,
             REFRESH_TOKEN_TTL_SECONDS: 60 * 60 * 24 * 30,
             PASSWORD_RESET_BASE_URL: "",

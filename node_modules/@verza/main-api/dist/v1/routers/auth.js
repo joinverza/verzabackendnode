@@ -38,6 +38,7 @@ export const authTokensResponseSchema = z.object({
 export const okResponseSchema = z.object({
     status: z.literal("ok")
 });
+const DEFAULT_TENANT_ID = "00000000-0000-0000-0000-000000000001";
 function now() {
     return new Date();
 }
@@ -58,7 +59,7 @@ export function createAuthRouter(ctx) {
             const passwordHash = await bcrypt.hash(body.password, 10);
             const userId = randomUuid();
             const ts = now();
-            await ctx.pool.query("insert into users (id, email, name, password_hash, created_at, updated_at) values ($1,$2,$3,$4,$5,$6)", [userId, body.email.toLowerCase(), body.name, passwordHash, ts, ts]);
+            await ctx.pool.query("insert into users (id, tenant_id, email, name, password_hash, created_at, updated_at) values ($1,$2,$3,$4,$5,$6,$7)", [userId, DEFAULT_TENANT_ID, body.email.toLowerCase(), body.name, passwordHash, ts, ts]);
             const refreshToken = generateRefreshToken();
             const refreshHash = sha256Hex(refreshToken);
             const sessionId = randomUuid();
@@ -67,8 +68,9 @@ export function createAuthRouter(ctx) {
             const accessToken = createAccessToken({
                 secret: ctx.config.JWT_SECRET,
                 issuer: ctx.config.JWT_ISSUER,
+                audience: ctx.config.JWT_AUDIENCE,
                 ttlSeconds: ctx.config.ACCESS_TOKEN_TTL_SECONDS,
-                claims: { sub: userId, email: body.email.toLowerCase(), role: "user", sid: sessionId }
+                claims: { sub: userId, email: body.email.toLowerCase(), role: "user", sid: sessionId, tid: DEFAULT_TENANT_ID }
             });
             res.json({ user: { id: userId }, access_token: accessToken, refresh_token: refreshToken });
         }
@@ -79,13 +81,16 @@ export function createAuthRouter(ctx) {
     router.post("/login", createRateLimiter({ windowMs: 60_000, limit: 20 }), async (req, res, next) => {
         try {
             const body = loginSchema.parse(req.body);
-            const result = await ctx.pool.query("select id,email,password_hash,role,twofa_enabled,twofa_secret,backup_codes_sha from users where email=$1 limit 1", [body.email.toLowerCase()]);
+            const result = await ctx.pool.query("select id,tenant_id,email,password_hash,role,twofa_enabled,twofa_secret,backup_codes_sha from users where email=$1 and status='active' limit 1", [body.email.toLowerCase()]);
             const user = result.rows[0];
             if (!user)
                 throw unauthorized("invalid_credentials", "Invalid credentials");
             const ok = await bcrypt.compare(body.password, user.password_hash);
             if (!ok)
                 throw unauthorized("invalid_credentials", "Invalid credentials");
+            if (ctx.config.REQUIRE_ADMIN_2FA && user.role === "admin" && !user.twofa_enabled) {
+                throw unauthorized("admin_twofa_required", "Admin 2FA required");
+            }
             if (user.twofa_enabled) {
                 const { verifyTwoFactorOrThrow } = await import("@verza/auth");
                 const twofaArgs = {
@@ -116,8 +121,9 @@ export function createAuthRouter(ctx) {
             const accessToken = createAccessToken({
                 secret: ctx.config.JWT_SECRET,
                 issuer: ctx.config.JWT_ISSUER,
+                audience: ctx.config.JWT_AUDIENCE,
                 ttlSeconds: ctx.config.ACCESS_TOKEN_TTL_SECONDS,
-                claims: { sub: user.id, email: user.email, role: user.role, sid: sessionId }
+                claims: { sub: user.id, email: user.email, role: user.role, sid: sessionId, tid: user.tenant_id }
             });
             res.json({ user: { id: user.id }, access_token: accessToken, refresh_token: refreshToken });
         }
@@ -129,7 +135,7 @@ export function createAuthRouter(ctx) {
         try {
             const body = refreshSchema.parse(req.body);
             const refreshHash = sha256Hex(body.refresh_token);
-            const result = await ctx.pool.query("select s.id, s.user_id, s.expires_at, s.revoked_at, u.role, u.email from sessions s join users u on u.id = s.user_id where s.refresh_token_hash=$1 limit 1", [refreshHash]);
+            const result = await ctx.pool.query("select s.id, s.user_id, s.expires_at, s.revoked_at, u.role, u.email, u.tenant_id from sessions s join users u on u.id = s.user_id where s.refresh_token_hash=$1 and u.status='active' limit 1", [refreshHash]);
             const row = result.rows[0];
             if (!row)
                 throw unauthorized("invalid_refresh", "Invalid refresh token");
@@ -148,8 +154,9 @@ export function createAuthRouter(ctx) {
             const accessToken = createAccessToken({
                 secret: ctx.config.JWT_SECRET,
                 issuer: ctx.config.JWT_ISSUER,
+                audience: ctx.config.JWT_AUDIENCE,
                 ttlSeconds: ctx.config.ACCESS_TOKEN_TTL_SECONDS,
-                claims: { sub: row.user_id, email: row.email, role: row.role, sid: row.id }
+                claims: { sub: row.user_id, email: row.email, role: row.role, sid: row.id, tid: row.tenant_id }
             });
             res.json({ user: { id: row.user_id }, access_token: accessToken, refresh_token: newRefreshToken });
         }

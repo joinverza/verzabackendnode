@@ -1,5 +1,7 @@
 import type { AddressInfo } from "node:net";
 import http from "node:http";
+import https from "node:https";
+import fs from "node:fs";
 
 import axios from "axios";
 import type { Request } from "express";
@@ -47,8 +49,20 @@ export function createIdentityGatewayServer() {
     });
   }
 
-  const httpClient = axios.create({ baseURL: config.ORCHESTRATOR_URL, timeout: 30_000 });
-  const auth = config.JWT_SECRET ? requireUser({ config: { JWT_SECRET: config.JWT_SECRET, JWT_ISSUER: config.JWT_ISSUER ?? "" } }) : null;
+  const httpsAgent = buildMtlsAgent({
+    caPath: config.ORCHESTRATOR_MTLS_CA_PATH,
+    certPath: config.ORCHESTRATOR_MTLS_CERT_PATH,
+    keyPath: config.ORCHESTRATOR_MTLS_KEY_PATH
+  });
+  assertMtlsConfigurationConsistent({ orchestratorUrl: config.ORCHESTRATOR_URL, httpsAgent, config });
+  const httpClient = axios.create({
+    baseURL: config.ORCHESTRATOR_URL,
+    timeout: 30_000,
+    ...(httpsAgent ? { httpsAgent } : {})
+  });
+  const auth = requireUser({
+    config: { JWT_SECRET: config.JWT_SECRET, JWT_ISSUER: config.JWT_ISSUER, JWT_AUDIENCE: config.JWT_AUDIENCE }
+  });
   const limiterKey = (req: any) => (req.auth?.userId ? `u:${req.auth.userId}` : `ip:${req.ip}`);
 
   const s3 = new S3Client({
@@ -63,7 +77,7 @@ export function createIdentityGatewayServer() {
 
   app.post(
     "/v1/sessions",
-    ...(auth ? [auth] : []),
+    auth,
     createRateLimiter({ windowMs: 60_000, limit: 60, keyGenerator: limiterKey }),
     (req: Request<Record<string, never>, unknown, unknown>, res, next) => {
     void (async () => {
@@ -76,7 +90,7 @@ export function createIdentityGatewayServer() {
 
   app.post(
     "/v1/media/presign",
-    ...(auth ? [auth] : []),
+    auth,
     createRateLimiter({ windowMs: 60_000, limit: 30, keyGenerator: limiterKey }),
     (req: Request<Record<string, never>, unknown, unknown>, res, next) => {
     void (async () => {
@@ -94,7 +108,7 @@ export function createIdentityGatewayServer() {
 
   app.post(
     "/v1/verifications",
-    ...(auth ? [auth] : []),
+    auth,
     createRateLimiter({ windowMs: 60_000, limit: 30, keyGenerator: limiterKey }),
     (req: Request<Record<string, never>, unknown, unknown>, res, next) => {
     void (async () => {
@@ -107,7 +121,7 @@ export function createIdentityGatewayServer() {
 
   app.all(
     "/v1/verifications/:id",
-    ...(auth ? [auth] : []),
+    auth,
     createRateLimiter({ windowMs: 60_000, limit: 120, keyGenerator: limiterKey }),
     (req: Request<{ id: string }, unknown, unknown>, res, next) => {
       void (async () => {
@@ -127,7 +141,7 @@ export function createIdentityGatewayServer() {
 
   app.all(
     "/v1/verifications/:id/*",
-    ...(auth ? [auth] : []),
+    auth,
     createRateLimiter({ windowMs: 60_000, limit: 120, keyGenerator: limiterKey }),
     (req: Request<{ id: string }, unknown, unknown>, res, next) => {
     void (async () => {
@@ -175,4 +189,43 @@ function passthroughHeaders(headers: Record<string, unknown>): Record<string, st
   const idem = typeof headers["idempotency-key"] === "string" ? headers["idempotency-key"] : undefined;
   if (idem) out["idempotency-key"] = idem;
   return out;
+}
+
+function buildMtlsAgent(opts: { caPath?: string | undefined; certPath?: string | undefined; keyPath?: string | undefined }) {
+  const caPath = String(opts.caPath ?? "").trim();
+  const certPath = String(opts.certPath ?? "").trim();
+  const keyPath = String(opts.keyPath ?? "").trim();
+  const hasAny = Boolean(caPath || certPath || keyPath);
+  if (!hasAny) return null;
+
+  const ca = caPath ? fs.readFileSync(caPath) : undefined;
+  const cert = certPath ? fs.readFileSync(certPath) : undefined;
+  const key = keyPath ? fs.readFileSync(keyPath) : undefined;
+
+  return new https.Agent({
+    ...(ca ? { ca } : {}),
+    ...(cert ? { cert } : {}),
+    ...(key ? { key } : {}),
+    rejectUnauthorized: true
+  });
+}
+
+function assertMtlsConfigurationConsistent(opts: {
+  orchestratorUrl: string;
+  httpsAgent: https.Agent | null;
+  config: { ORCHESTRATOR_MTLS_CA_PATH?: string | undefined; ORCHESTRATOR_MTLS_CERT_PATH?: string | undefined; ORCHESTRATOR_MTLS_KEY_PATH?: string | undefined };
+}) {
+  const url = String(opts.orchestratorUrl ?? "").trim();
+  const ca = String(opts.config.ORCHESTRATOR_MTLS_CA_PATH ?? "").trim();
+  const cert = String(opts.config.ORCHESTRATOR_MTLS_CERT_PATH ?? "").trim();
+  const key = String(opts.config.ORCHESTRATOR_MTLS_KEY_PATH ?? "").trim();
+  const wantsMtls = Boolean(ca || cert || key);
+  const isHttps = url.toLowerCase().startsWith("https://");
+  if (isHttps) {
+    if (!wantsMtls) throw new Error("identity-gateway ORCHESTRATOR_URL is https:// but mTLS is not configured");
+    if (!opts.httpsAgent) throw new Error("identity-gateway mTLS misconfigured");
+    if (!ca || !cert || !key) throw new Error("identity-gateway mTLS requires ORCHESTRATOR_MTLS_CA_PATH, ORCHESTRATOR_MTLS_CERT_PATH, ORCHESTRATOR_MTLS_KEY_PATH");
+  } else {
+    if (wantsMtls) throw new Error("identity-gateway mTLS is configured but ORCHESTRATOR_URL is not https://");
+  }
 }

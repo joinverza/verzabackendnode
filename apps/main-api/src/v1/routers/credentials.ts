@@ -64,9 +64,10 @@ export function createCredentialsRouter(ctx: MainApiContext): Router {
         plaintext: body.data
       });
       await ctx.pool.query(
-        "insert into credentials (id, owner_user_id, owner_did, type, status, issuer_name, document_number, issue_date, expiry_date, issuing_authority, notes, encrypted_data, created_at, updated_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
+        "insert into credentials (id, tenant_id, owner_user_id, owner_did, type, status, issuer_name, document_number, issue_date, expiry_date, issuing_authority, notes, encrypted_data, created_at, updated_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)",
         [
           id,
+          req.auth.tenantId,
           req.auth.userId,
           "",
           body.type,
@@ -91,8 +92,8 @@ export function createCredentialsRouter(ctx: MainApiContext): Router {
   router.get("/", async (req, res, next) => {
     try {
       const result = await ctx.pool.query(
-        "select id, type, status, issuer_name, document_number, created_at, updated_at from credentials where owner_user_id=$1 order by created_at desc",
-        [req.auth.userId]
+        "select id, type, status, issuer_name, document_number, created_at, updated_at from credentials where tenant_id=$1 and owner_user_id=$2 order by created_at desc",
+        [req.auth.tenantId, req.auth.userId]
       );
       res.json(result.rows);
     } catch (err) {
@@ -104,8 +105,8 @@ export function createCredentialsRouter(ctx: MainApiContext): Router {
     try {
       const { credentialId } = credentialIdSchema.parse(req.params);
       const result = await ctx.pool.query(
-        "select * from credentials where id=$1 and owner_user_id=$2 limit 1",
-        [credentialId, req.auth.userId]
+        "select * from credentials where id=$1 and tenant_id=$2 and owner_user_id=$3 limit 1",
+        [credentialId, req.auth.tenantId, req.auth.userId]
       );
       const row = result.rows[0];
       if (!row) throw notFound("credential_not_found", "Credential not found");
@@ -126,8 +127,8 @@ export function createCredentialsRouter(ctx: MainApiContext): Router {
         })
         .parse(req.body);
       await ctx.pool.query(
-        "update credentials set status=coalesce($1,status), notes=coalesce($2,notes), updated_at=$3 where id=$4 and owner_user_id=$5",
-        [body.status ?? null, body.notes ?? null, new Date(), credentialId, req.auth.userId]
+        "update credentials set status=coalesce($1,status), notes=coalesce($2,notes), updated_at=$3 where id=$4 and tenant_id=$5 and owner_user_id=$6",
+        [body.status ?? null, body.notes ?? null, new Date(), credentialId, req.auth.tenantId, req.auth.userId]
       );
       res.json({ status: "ok" });
     } catch (err) {
@@ -139,7 +140,12 @@ export function createCredentialsRouter(ctx: MainApiContext): Router {
     try {
       const { credentialId } = credentialIdSchema.parse(req.params);
       const type = typeof req.query.type === "string" && req.query.type.trim().length ? req.query.type.trim() : undefined;
-      const proof = await getOrCreateProofForCredential(ctx, { userId: req.auth.userId, credentialId, ...(type ? { type } : {}) });
+      const proof = await getOrCreateProofForCredential(ctx, {
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        credentialId,
+        ...(type ? { type } : {})
+      });
       res.json(proof);
     } catch (err) {
       next(err);
@@ -150,8 +156,8 @@ export function createCredentialsRouter(ctx: MainApiContext): Router {
     try {
       const { credentialId } = credentialIdSchema.parse(req.params);
       const result = await ctx.pool.query(
-        "select id, credential_id, owner_user_id, recipient_did, recipient, permission, purpose, token, expires_at, revoked_at, created_at from credential_shares where credential_id=$1 and owner_user_id=$2 order by created_at desc",
-        [credentialId, req.auth.userId]
+        "select id, credential_id, owner_user_id, recipient_did, recipient, permission, purpose, token, expires_at, revoked_at, created_at from credential_shares where tenant_id=$1 and credential_id=$2 and owner_user_id=$3 order by created_at desc",
+        [req.auth.tenantId, credentialId, req.auth.userId]
       );
       res.json(result.rows);
     } catch (err) {
@@ -163,8 +169,8 @@ export function createCredentialsRouter(ctx: MainApiContext): Router {
     try {
       const { credentialId, shareId } = shareIdSchema.parse(req.params);
       await ctx.pool.query(
-        "update credential_shares set revoked_at=$1 where id=$2 and credential_id=$3 and owner_user_id=$4",
-        [new Date(), shareId, credentialId, req.auth.userId]
+        "update credential_shares set revoked_at=$1 where tenant_id=$2 and id=$3 and credential_id=$4 and owner_user_id=$5",
+        [new Date(), req.auth.tenantId, shareId, credentialId, req.auth.userId]
       );
       res.json({ status: "ok" });
     } catch (err) {
@@ -180,14 +186,15 @@ export function createCredentialsRouter(ctx: MainApiContext): Router {
       const expiresAt = body.expires_at ? new Date(body.expires_at) : null;
       const createdAt = new Date();
       const result = await ctx.pool.query<{ ok: number }>(
-        "select 1 as ok from credentials where id=$1 and owner_user_id=$2 limit 1",
-        [body.credential_id, req.auth.userId]
+        "select 1 as ok from credentials where id=$1 and tenant_id=$2 and owner_user_id=$3 limit 1",
+        [body.credential_id, req.auth.tenantId, req.auth.userId]
       );
       if (!result.rowCount) throw badRequest("credential_not_found", "Credential not found");
       await ctx.pool.query(
-        "insert into credential_shares (id, credential_id, owner_user_id, recipient_did, recipient, permission, purpose, token, expires_at, created_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+        "insert into credential_shares (id, tenant_id, credential_id, owner_user_id, recipient_did, recipient, permission, purpose, token, expires_at, created_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
         [
           id,
+          req.auth.tenantId,
           body.credential_id,
           req.auth.userId,
           body.recipient_did ?? "",
@@ -214,7 +221,7 @@ export function createPublicSharesRouter(ctx: MainApiContext): Router {
     try {
       const { token } = publicShareSchema.parse(req.params);
       const result = await ctx.pool.query(
-        "select cs.token, cs.expires_at, cs.revoked_at, c.encrypted_data from credential_shares cs join credentials c on c.id = cs.credential_id where cs.token=$1 limit 1",
+        "select cs.token, cs.expires_at, cs.revoked_at, c.encrypted_data from credential_shares cs join credentials c on c.id = cs.credential_id and c.tenant_id = cs.tenant_id where cs.token=$1 limit 1",
         [token]
       );
       const row = result.rows[0];

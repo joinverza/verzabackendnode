@@ -1,23 +1,27 @@
 import type { RequestHandler } from "express";
 import type { Pool } from "pg";
 type JwtClaims = {
-    iss?: string;
+    iss: string;
+    aud: string;
     sub: string;
     email: string;
     role: string;
     sid: string;
+    tid?: string;
     iat: number;
     exp: number;
 };
 export declare function createAccessToken(opts: {
     secret: string;
     issuer: string;
+    audience: string;
     ttlSeconds: number;
     claims: {
         sub: string;
         email: string;
         role: string;
         sid: string;
+        tid?: string;
     };
 }): string;
 export declare function generateRefreshToken(): string;
@@ -25,11 +29,13 @@ export declare function verifyAccessToken(opts: {
     token: string;
     secret: string;
     issuer: string;
+    audience: string;
 }): JwtClaims | null;
 export type AuthContext = {
     config: {
         JWT_SECRET: string;
         JWT_ISSUER: string;
+        JWT_AUDIENCE: string;
     };
 };
 export declare function requireUser(ctx: AuthContext): RequestHandler;
@@ -45,12 +51,14 @@ declare module "express-serve-static-core" {
             role: string;
             sessionId: string;
             email: string;
+            tenantId: string;
         };
         institution: {
             id: string;
             name: string;
             status: string;
             apiKeyId: string;
+            tenantId: string;
         };
     }
 }

@@ -181,7 +181,8 @@ void test("fiat/stripe: reconcile updates pending sessions and writes ledger", a
   const secret = "x".repeat(32);
   const token = createAccessToken({
     secret,
-    issuer: "",
+    issuer: "verza",
+    audience: "verza",
     ttlSeconds: 900,
     claims: { sub: "00000000-0000-0000-0000-000000000001", email: "a@example.com", role: "admin", sid: "s1" }
   });
@@ -275,7 +276,7 @@ void test("fiat/stripe: reconcile updates pending sessions and writes ledger", a
   app.use(
     "/api/v1/fiat/payments",
     createFiatPaymentsRouter({
-      config: { JWT_SECRET: secret, JWT_ISSUER: "", RECEIPT_ED25519_SEED_B64: Buffer.alloc(32).toString("base64") } as any,
+      config: { JWT_SECRET: secret, JWT_ISSUER: "verza", JWT_AUDIENCE: "verza", RECEIPT_ED25519_SEED_B64: Buffer.alloc(32).toString("base64") } as any,
       logger,
       pool,
       stripe: fakeStripe
@@ -309,7 +310,8 @@ void test("admin/bridge: auth required and workflows behave", async () => {
   const secret = "x".repeat(32);
   const adminToken = createAccessToken({
     secret,
-    issuer: "",
+    issuer: "verza",
+    audience: "verza",
     ttlSeconds: 900,
     claims: { sub: "00000000-0000-0000-0000-000000000001", email: "a@example.com", role: "admin", sid: "s1" }
   });
@@ -383,7 +385,7 @@ void test("admin/bridge: auth required and workflows behave", async () => {
 
   const logger = createLogger({ service: "main-api-test", level: "silent" });
   const app = createHttpApp({ logger, corsAllowedOrigins: [] });
-  const ctx = { config: { JWT_SECRET: secret, JWT_ISSUER: "" }, logger, pool } as any;
+  const ctx = { config: { JWT_SECRET: secret, JWT_ISSUER: "verza", JWT_AUDIENCE: "verza" }, logger, pool } as any;
   app.use("/admin/bridge", requireAdmin(ctx), createAdminBridgeRouter(ctx));
   app.use(notFoundHandler);
   app.use(errorHandler());
@@ -424,14 +426,15 @@ void test("admin/institutions: api keys and members workflows behave", async () 
   const secret = "x".repeat(32);
   const adminToken = createAccessToken({
     secret,
-    issuer: "",
+    issuer: "verza",
+    audience: "verza",
     ttlSeconds: 900,
-    claims: { sub: "00000000-0000-0000-0000-000000000001", email: "a@example.com", role: "admin", sid: "s1" }
+    claims: { sub: "00000000-0000-0000-0000-000000000001", email: "a@example.com", role: "admin", sid: "s1", tid: "t-1" }
   });
 
   const institutions = new Map<
     string,
-    { id: string; name: string; status: string; created_at: Date; updated_at: Date }
+    { id: string; tenant_id: string; name: string; status: string; created_at: Date; updated_at: Date }
   >();
   const apiKeys = new Map<string, { id: string; institution_id: string; key_hash: string; last4: string; revoked_at: Date | null }>();
   const users = new Map<string, { id: string; email: string; name: string }>();
@@ -446,7 +449,10 @@ void test("admin/institutions: api keys and members workflows behave", async () 
       const q = sql.replace(/\s+/g, " ").trim().toLowerCase();
 
       if (q.includes("from institutions i") && q.includes("left join")) {
-        const rows = Array.from(institutions.values()).map((i) => {
+        const [tenantId] = params as [string];
+        const rows = Array.from(institutions.values())
+          .filter((i) => i.tenant_id === tenantId)
+          .map((i) => {
           const member_count = Array.from(members.values()).filter((m) => m.institution_id === i.id).length;
           const api_key_count = Array.from(apiKeys.values()).filter((k) => k.institution_id === i.id).length;
           return { ...i, member_count, api_key_count };
@@ -455,29 +461,32 @@ void test("admin/institutions: api keys and members workflows behave", async () 
       }
 
       if (q.startsWith("insert into institutions")) {
-        const [id, name, status, createdAt, updatedAt] = params as [string, string, string, Date, Date];
-        institutions.set(id, { id, name, status, created_at: createdAt, updated_at: updatedAt });
+        const [id, tenantId, name, status, createdAt, updatedAt] = params as [string, string, string, string, Date, Date];
+        institutions.set(id, { id, tenant_id: tenantId, name, status, created_at: createdAt, updated_at: updatedAt });
         return { rowCount: 1, rows: [] };
       }
 
-      if (q.startsWith("select id,name,status,created_at,updated_at from institutions where id=$1")) {
-        const [id] = params as [string];
+      if (q.startsWith("select id,name,status,created_at,updated_at from institutions where id=$1 and tenant_id=$2")) {
+        const [id, tenantId] = params as [string, string];
         const row = institutions.get(id);
-        return { rowCount: row ? 1 : 0, rows: row ? [{ ...row }] : [] };
+        if (!row || row.tenant_id !== tenantId) return { rowCount: 0, rows: [] };
+        return { rowCount: 1, rows: [{ ...row }] };
       }
 
       if (q.startsWith("update institutions set status=$1")) {
-        const [status, updatedAt, id] = params as [string, Date, string];
+        const [status, updatedAt, id, tenantId] = params as [string, Date, string, string];
         const row = institutions.get(id);
-        if (!row) return { rowCount: 0, rows: [] };
+        if (!row || row.tenant_id !== tenantId) return { rowCount: 0, rows: [] };
         row.status = status;
         row.updated_at = updatedAt;
         return { rowCount: 1, rows: [] };
       }
 
-      if (q.startsWith("select 1 as ok from institutions where id=$1")) {
-        const [id] = params as [string];
-        return { rowCount: institutions.has(id) ? 1 : 0, rows: institutions.has(id) ? [{ ok: 1 }] : [] };
+      if (q.startsWith("select 1 as ok from institutions where id=$1 and tenant_id=$2")) {
+        const [id, tenantId] = params as [string, string];
+        const row = institutions.get(id);
+        if (!row || row.tenant_id !== tenantId) return { rowCount: 0, rows: [] };
+        return { rowCount: 1, rows: [{ ok: 1 }] };
       }
 
       if (q.startsWith("insert into institution_api_keys")) {
@@ -545,7 +554,7 @@ void test("admin/institutions: api keys and members workflows behave", async () 
 
   const logger = createLogger({ service: "main-api-test", level: "silent" });
   const app = createHttpApp({ logger, corsAllowedOrigins: [] });
-  const ctx = { config: { JWT_SECRET: secret, JWT_ISSUER: "" }, logger, pool } as any;
+  const ctx = { config: { JWT_SECRET: secret, JWT_ISSUER: "verza", JWT_AUDIENCE: "verza" }, logger, pool } as any;
   app.use("/admin/institutions", requireAdmin(ctx), createAdminInstitutionsRouter(ctx));
   app.use(notFoundHandler);
   app.use(errorHandler());

@@ -7,11 +7,13 @@ import { sha256Hex } from "@verza/crypto";
 import { forbidden, unauthorized } from "@verza/http";
 
 type JwtClaims = {
-  iss?: string;
+  iss: string;
+  aud: string;
   sub: string;
   email: string;
   role: string;
   sid: string;
+  tid?: string;
   iat: number;
   exp: number;
 };
@@ -19,20 +21,23 @@ type JwtClaims = {
 export function createAccessToken(opts: {
   secret: string;
   issuer: string;
+  audience: string;
   ttlSeconds: number;
-  claims: { sub: string; email: string; role: string; sid: string };
+  claims: { sub: string; email: string; role: string; sid: string; tid?: string };
 }) {
   const header = { alg: "HS256", typ: "JWT" };
   const now = Math.floor(Date.now() / 1000);
   const payload: JwtClaims = {
+    iss: opts.issuer,
+    aud: opts.audience,
     sub: opts.claims.sub,
     email: opts.claims.email,
     role: opts.claims.role,
     sid: opts.claims.sid,
+    ...(opts.claims.tid ? { tid: opts.claims.tid } : {}),
     iat: now,
     exp: now + opts.ttlSeconds
   };
-  if (opts.issuer) payload.iss = opts.issuer;
   return signHs256Jwt({ header, payload, secret: opts.secret });
 }
 
@@ -41,22 +46,24 @@ export function generateRefreshToken() {
   return base64Url(bytes);
 }
 
-export function verifyAccessToken(opts: { token: string; secret: string; issuer: string }) {
+export function verifyAccessToken(opts: { token: string; secret: string; issuer: string; audience: string }) {
   const parsed = verifyHs256Jwt({ token: opts.token, secret: opts.secret });
   if (!parsed) return null;
   const { payload } = parsed;
   if (typeof payload.sub !== "string" || typeof payload.email !== "string" || typeof payload.role !== "string" || typeof payload.sid !== "string") {
     return null;
   }
+  if (typeof payload.iss !== "string" || typeof payload.aud !== "string") return null;
   if (typeof payload.exp !== "number" || typeof payload.iat !== "number") return null;
   const now = Math.floor(Date.now() / 1000);
   if (payload.exp <= now) return null;
-  if (opts.issuer && payload.iss !== opts.issuer) return null;
+  if (payload.iss !== opts.issuer) return null;
+  if (payload.aud !== opts.audience) return null;
   return payload as JwtClaims;
 }
 
 export type AuthContext = {
-  config: { JWT_SECRET: string; JWT_ISSUER: string };
+  config: { JWT_SECRET: string; JWT_ISSUER: string; JWT_AUDIENCE: string };
 };
 
 export function requireUser(ctx: AuthContext): RequestHandler {
@@ -65,9 +72,14 @@ export function requireUser(ctx: AuthContext): RequestHandler {
       const auth = req.header("authorization") ?? "";
       const m = auth.match(/^Bearer\s+(.+)$/i);
       if (!m?.[1]) throw unauthorized("missing_auth", "Missing bearer token");
-      const claims = verifyAccessToken({ token: m[1], secret: ctx.config.JWT_SECRET, issuer: ctx.config.JWT_ISSUER });
+      const claims = verifyAccessToken({
+        token: m[1],
+        secret: ctx.config.JWT_SECRET,
+        issuer: ctx.config.JWT_ISSUER,
+        audience: ctx.config.JWT_AUDIENCE
+      });
       if (!claims) throw unauthorized("invalid_token", "Invalid token");
-      req.auth = { userId: claims.sub, role: claims.role, sessionId: claims.sid, email: claims.email };
+      req.auth = { userId: claims.sub, role: claims.role, sessionId: claims.sid, email: claims.email, tenantId: claims.tid ?? "" };
       next();
     } catch (err) {
       next(err);
@@ -99,15 +111,22 @@ export function requireInstitutionApiKey(ctx: InstitutionAuthContext & AuthConte
         parseApiKeyAuthHeader(req.header("authorization") ?? "");
       if (!rawKey) throw unauthorized("missing_api_key", "Missing API key");
       const keyHash = sha256Hex(rawKey);
-      const result = await ctx.pool.query<{ id: string; institution_id: string; revoked_at: Date | null; name: string; status: string }>(
-        "select k.id, k.institution_id, k.revoked_at, i.name, i.status from institution_api_keys k join institutions i on i.id = k.institution_id where k.key_hash=$1 limit 1",
+      const result = await ctx.pool.query<{
+        id: string;
+        institution_id: string;
+        revoked_at: Date | null;
+        name: string;
+        status: string;
+        tenant_id: string;
+      }>(
+        "select k.id, k.institution_id, k.revoked_at, i.name, i.status, i.tenant_id from institution_api_keys k join institutions i on i.id = k.institution_id where k.key_hash=$1 limit 1",
         [keyHash]
       );
       const row = result.rows[0];
       if (!row) throw unauthorized("invalid_api_key", "Invalid API key");
       if (row.revoked_at) throw unauthorized("revoked_api_key", "API key revoked");
       if (row.status !== "active") throw unauthorized("inactive_institution", "Institution inactive");
-      req.institution = { id: row.institution_id, name: row.name, status: row.status, apiKeyId: row.id };
+      req.institution = { id: row.institution_id, name: row.name, status: row.status, apiKeyId: row.id, tenantId: row.tenant_id ?? "" };
       next();
     })().catch(next);
   };
@@ -120,8 +139,8 @@ function parseApiKeyAuthHeader(value: string) {
 
 declare module "express-serve-static-core" {
   interface Request {
-    auth: { userId: string; role: string; sessionId: string; email: string };
-    institution: { id: string; name: string; status: string; apiKeyId: string };
+    auth: { userId: string; role: string; sessionId: string; email: string; tenantId: string };
+    institution: { id: string; name: string; status: string; apiKeyId: string; tenantId: string };
   }
 }
 

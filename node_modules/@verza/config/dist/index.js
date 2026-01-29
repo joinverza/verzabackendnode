@@ -21,7 +21,8 @@ const mainApiSchema = baseSchema.extend({
     DATABASE_URL: z.string().min(1),
     REDIS_URL: z.string().optional(),
     JWT_SECRET: z.string().min(16),
-    JWT_ISSUER: z.string().default(""),
+    JWT_ISSUER: z.string().min(1).default("verza"),
+    JWT_AUDIENCE: z.string().min(1).default("verza"),
     ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
     REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(60 * 60 * 24 * 30),
     ENCRYPTION_MASTER_KEY_B64: z.string().min(1),
@@ -29,6 +30,11 @@ const mainApiSchema = baseSchema.extend({
     IDENTITY_GATEWAY_URL: z.string().optional(),
     IDENTITY_RETENTION_DAYS: z.coerce.number().int().nonnegative().optional().default(0),
     DID_SESSION_SECRET: z.string().optional(),
+    REQUIRE_ADMIN_2FA: z
+        .string()
+        .optional()
+        .default("1")
+        .transform((v) => v === "1" || v.toLowerCase() === "true"),
     PASSWORD_RESET_BASE_URL: z.string().optional(),
     SMTP_HOST: z.string().optional(),
     SMTP_PORT: z.coerce.number().optional(),
@@ -58,8 +64,12 @@ export function createMainApiConfig(env) {
 const identityGatewaySchema = baseSchema.extend({
     PORT: z.coerce.number().default(8088),
     ORCHESTRATOR_URL: z.string().min(1),
-    JWT_SECRET: z.string().min(16).optional(),
-    JWT_ISSUER: z.string().optional().default(""),
+    JWT_SECRET: z.string().min(16),
+    JWT_ISSUER: z.string().min(1).default("verza"),
+    JWT_AUDIENCE: z.string().min(1).default("verza"),
+    ORCHESTRATOR_MTLS_CA_PATH: z.string().optional(),
+    ORCHESTRATOR_MTLS_CERT_PATH: z.string().optional(),
+    ORCHESTRATOR_MTLS_KEY_PATH: z.string().optional(),
     S3_ENDPOINT: z.string().min(1),
     S3_ACCESS_KEY_ID: z.string().min(1),
     S3_SECRET_ACCESS_KEY: z.string().min(1),
@@ -79,8 +89,17 @@ const identityOrchestratorSchema = baseSchema.extend({
     INFERENCE_URL: z.string().min(1),
     REDIS_URL: z.string().optional(),
     JWT_SECRET: z.string().min(16),
-    JWT_ISSUER: z.string().default(""),
+    JWT_ISSUER: z.string().min(1).default("verza"),
+    JWT_AUDIENCE: z.string().min(1).default("verza"),
     IDENTITY_RETENTION_DAYS: z.coerce.number().int().nonnegative().optional().default(0),
+    TLS_KEY_PATH: z.string().optional(),
+    TLS_CERT_PATH: z.string().optional(),
+    TLS_CA_PATH: z.string().optional(),
+    TLS_REQUIRE_CLIENT_CERT: z
+        .string()
+        .optional()
+        .default("0")
+        .transform((v) => v === "1" || v?.toLowerCase() === "true"),
     S3_ENDPOINT: z.string().optional(),
     S3_ACCESS_KEY_ID: z.string().optional(),
     S3_SECRET_ACCESS_KEY: z.string().optional(),

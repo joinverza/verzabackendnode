@@ -52,8 +52,8 @@ export function createInstitutionRouter(ctx: MainApiContext): Router {
     try {
       const inst = req.institution;
       const result = await ctx.pool.query(
-        "select id,user_id,credential_id,allowed_fields_json,purpose,status,expires_at,revoked_at,created_at from consents where institution_id=$1 order by created_at desc",
-        [inst.id]
+        "select id,user_id,credential_id,allowed_fields_json,purpose,status,expires_at,revoked_at,created_at from consents where tenant_id=$1 and institution_id=$2 order by created_at desc",
+        [inst.tenantId, inst.id]
       );
       res.json(result.rows.map((r) => ({ ...r, allowed_fields: safeJson(r.allowed_fields_json) })));
     } catch (err) {
@@ -66,8 +66,8 @@ export function createInstitutionRouter(ctx: MainApiContext): Router {
       const consentId = z.string().uuid().parse(req.params.consent_id);
       const inst = req.institution;
       const result = await ctx.pool.query(
-        "select id,user_id,credential_id,allowed_fields_json,purpose,status,expires_at,revoked_at,created_at from consents where id=$1 and institution_id=$2",
-        [consentId, inst.id]
+        "select id,user_id,credential_id,allowed_fields_json,purpose,status,expires_at,revoked_at,created_at from consents where id=$1 and tenant_id=$2 and institution_id=$3",
+        [consentId, inst.tenantId, inst.id]
       );
       const row = result.rows[0];
       if (!row) throw notFound("consent_not_found", "Consent not found");
@@ -82,8 +82,8 @@ export function createInstitutionRouter(ctx: MainApiContext): Router {
       const consentId = z.string().uuid().parse(req.params.consent_id);
       const inst = req.institution;
       const result = await ctx.pool.query(
-        "select cae.id,cae.event_type,cae.actor_type,cae.actor_id,cae.data_json,cae.created_at from consent_audit_events cae join consents c on c.id = cae.consent_id where cae.consent_id=$1 and c.institution_id=$2 order by cae.created_at asc",
-        [consentId, inst.id]
+        "select cae.id,cae.event_type,cae.actor_type,cae.actor_id,cae.data_json,cae.created_at from consent_audit_events cae join consents c on c.id = cae.consent_id where cae.consent_id=$1 and c.tenant_id=$2 and c.institution_id=$3 order by cae.created_at asc",
+        [consentId, inst.tenantId, inst.id]
       );
       res.json(result.rows.map((r) => ({ ...r, data: safeJson(r.data_json) })));
     } catch (err) {
@@ -102,8 +102,9 @@ export function createInstitutionRouter(ctx: MainApiContext): Router {
         status: string;
         revoked_at: Date | null;
         expires_at: Date | null;
-      }>("select credential_id,allowed_fields_json,status,revoked_at,expires_at from consents where id=$1 and institution_id=$2 limit 1", [
+      }>("select credential_id,allowed_fields_json,status,revoked_at,expires_at from consents where id=$1 and tenant_id=$2 and institution_id=$3 limit 1", [
         consentId,
+        inst.tenantId,
         inst.id
       ]);
       const c = consent.rows[0];
@@ -113,8 +114,8 @@ export function createInstitutionRouter(ctx: MainApiContext): Router {
       }
 
       const result = await ctx.pool.query(
-        "select id,owner_user_id,owner_did,type,status,issuer_name,document_number,issue_date,expiry_date,issuing_authority,notes,created_at,updated_at from credentials where id=$1 limit 1",
-        [c.credential_id]
+        "select id,owner_user_id,owner_did,type,status,issuer_name,document_number,issue_date,expiry_date,issuing_authority,notes,created_at,updated_at from credentials where id=$1 and tenant_id=$2 limit 1",
+        [c.credential_id, inst.tenantId]
       );
       const row = result.rows[0];
       if (!row) throw notFound("credential_not_found", "Credential not found");
@@ -131,8 +132,8 @@ export function createInstitutionRouter(ctx: MainApiContext): Router {
       const inst = req.institution;
       const now = new Date();
       const consent = await ctx.pool.query<{ user_id: string; status: string; revoked_at: Date | null; expires_at: Date | null }>(
-        "select user_id,status,revoked_at,expires_at from consents where id=$1 and institution_id=$2 limit 1",
-        [consentId, inst.id]
+        "select user_id,status,revoked_at,expires_at from consents where id=$1 and tenant_id=$2 and institution_id=$3 limit 1",
+        [consentId, inst.tenantId, inst.id]
       );
       const c = consent.rows[0];
       if (!c) throw notFound("consent_not_found", "Consent not found");
@@ -140,8 +141,8 @@ export function createInstitutionRouter(ctx: MainApiContext): Router {
         throw forbidden("consent_inactive", "Consent is not active");
       }
       const result = await ctx.pool.query(
-        "select id,user_id,credential_id,status,provider,document_type,confidence_threshold,scores_json,reasons_json,signals_json,locale,server_received_at,completed_at,verifier_institution_id,standard,verifier_reference from identity_verifications where user_id=$1 order by server_received_at desc",
-        [c.user_id]
+        "select id,user_id,credential_id,status,provider,document_type,confidence_threshold,scores_json,reasons_json,signals_json,locale,server_received_at,completed_at,verifier_institution_id,standard,verifier_reference from identity_verifications where tenant_id=$1 and user_id=$2 order by server_received_at desc",
+        [inst.tenantId, c.user_id]
       );
       res.json(
         result.rows.map((r) => ({
@@ -163,8 +164,8 @@ export function createInstitutionRouter(ctx: MainApiContext): Router {
       const body = identityAttestationSchema.parse(req.body ?? {});
 
       const verification = await ctx.pool.query<{ id: string; user_id: string; status: string }>(
-        "select id,user_id,status from identity_verifications where id=$1 limit 1",
-        [body.verification_id]
+        "select id,user_id,status from identity_verifications where id=$1 and tenant_id=$2 limit 1",
+        [body.verification_id, inst.tenantId]
       );
       const vr = verification.rows[0];
       if (!vr) throw notFound("identity_verification_not_found", "Identity verification not found");
@@ -172,20 +173,20 @@ export function createInstitutionRouter(ctx: MainApiContext): Router {
 
       if (body.consent_id) {
         const access = await ctx.pool.query<{ ok: number }>(
-          "select 1 as ok from consents where id=$1 and institution_id=$2 and user_id=$3 and status='active' and revoked_at is null and (expires_at is null or expires_at > $4) limit 1",
-          [body.consent_id, inst.id, vr.user_id, now]
+          "select 1 as ok from consents where id=$1 and tenant_id=$2 and institution_id=$3 and user_id=$4 and status='active' and revoked_at is null and (expires_at is null or expires_at > $5) limit 1",
+          [body.consent_id, inst.tenantId, inst.id, vr.user_id, now]
         );
         if (!access.rowCount) throw forbidden("consent_required", "Active consent required");
       } else {
         const access = await ctx.pool.query<{ ok: number }>(
-          "select 1 as ok from consents where institution_id=$1 and user_id=$2 and status='active' and revoked_at is null and (expires_at is null or expires_at > $3) limit 1",
-          [inst.id, vr.user_id, now]
+          "select 1 as ok from consents where tenant_id=$1 and institution_id=$2 and user_id=$3 and status='active' and revoked_at is null and (expires_at is null or expires_at > $4) limit 1",
+          [inst.tenantId, inst.id, vr.user_id, now]
         );
         if (!access.rowCount) throw forbidden("consent_required", "Active consent required");
       }
 
       await ctx.pool.query(
-        "update identity_verifications set status=$1, scores_json=$2, reasons_json=$3, signals_json=$4, completed_at=$5, verifier_institution_id=$6, standard=$7, verifier_reference=$8 where id=$9",
+        "update identity_verifications set status=$1, scores_json=$2, reasons_json=$3, signals_json=$4, completed_at=$5, verifier_institution_id=$6, standard=$7, verifier_reference=$8 where id=$9 and tenant_id=$10",
         [
           body.status,
           JSON.stringify(body.scores),
@@ -195,13 +196,15 @@ export function createInstitutionRouter(ctx: MainApiContext): Router {
           inst.id,
           body.standard,
           body.verifier_reference,
-          body.verification_id
+          body.verification_id,
+          inst.tenantId
         ]
       );
       await ctx.pool.query(
-        "insert into identity_verification_audit_events (id,verification_id,user_id,event_type,data_json,created_at) values ($1,$2,$3,$4,$5,$6)",
+        "insert into identity_verification_audit_events (id,tenant_id,verification_id,user_id,event_type,data_json,created_at) values ($1,$2,$3,$4,$5,$6,$7)",
         [
           crypto.randomUUID(),
+          inst.tenantId,
           body.verification_id,
           vr.user_id,
           "attested_institution",
@@ -219,8 +222,8 @@ export function createInstitutionRouter(ctx: MainApiContext): Router {
     try {
       const inst = req.institution;
       const result = await ctx.pool.query(
-        "select id,user_id,credential_id,status,provider,document_type,confidence_threshold,locale,server_received_at,completed_at,verifier_institution_id,standard,verifier_reference,scores_json,reasons_json,signals_json from identity_verifications where verifier_institution_id=$1 order by server_received_at desc",
-        [inst.id]
+        "select id,user_id,credential_id,status,provider,document_type,confidence_threshold,locale,server_received_at,completed_at,verifier_institution_id,standard,verifier_reference,scores_json,reasons_json,signals_json from identity_verifications where tenant_id=$1 and verifier_institution_id=$2 order by server_received_at desc",
+        [inst.tenantId, inst.id]
       );
       res.json(result.rows);
     } catch (err) {
@@ -233,8 +236,8 @@ export function createInstitutionRouter(ctx: MainApiContext): Router {
       const id = z.string().uuid().parse(req.params.verification_id);
       const inst = req.institution;
       const result = await ctx.pool.query(
-        "select id,user_id,credential_id,status,provider,document_type,confidence_threshold,locale,server_received_at,completed_at,verifier_institution_id,standard,verifier_reference,scores_json,reasons_json,signals_json from identity_verifications where id=$1 and verifier_institution_id=$2",
-        [id, inst.id]
+        "select id,user_id,credential_id,status,provider,document_type,confidence_threshold,locale,server_received_at,completed_at,verifier_institution_id,standard,verifier_reference,scores_json,reasons_json,signals_json from identity_verifications where id=$1 and tenant_id=$2 and verifier_institution_id=$3",
+        [id, inst.tenantId, inst.id]
       );
       const row = result.rows[0];
       if (!row) throw notFound("identity_verification_not_found", "Identity verification not found");

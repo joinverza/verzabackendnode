@@ -5,15 +5,16 @@ export function createAccessToken(opts) {
     const header = { alg: "HS256", typ: "JWT" };
     const now = Math.floor(Date.now() / 1000);
     const payload = {
+        iss: opts.issuer,
+        aud: opts.audience,
         sub: opts.claims.sub,
         email: opts.claims.email,
         role: opts.claims.role,
         sid: opts.claims.sid,
+        ...(opts.claims.tid ? { tid: opts.claims.tid } : {}),
         iat: now,
         exp: now + opts.ttlSeconds
     };
-    if (opts.issuer)
-        payload.iss = opts.issuer;
     return signHs256Jwt({ header, payload, secret: opts.secret });
 }
 export function generateRefreshToken() {
@@ -28,12 +29,16 @@ export function verifyAccessToken(opts) {
     if (typeof payload.sub !== "string" || typeof payload.email !== "string" || typeof payload.role !== "string" || typeof payload.sid !== "string") {
         return null;
     }
+    if (typeof payload.iss !== "string" || typeof payload.aud !== "string")
+        return null;
     if (typeof payload.exp !== "number" || typeof payload.iat !== "number")
         return null;
     const now = Math.floor(Date.now() / 1000);
     if (payload.exp <= now)
         return null;
-    if (opts.issuer && payload.iss !== opts.issuer)
+    if (payload.iss !== opts.issuer)
+        return null;
+    if (payload.aud !== opts.audience)
         return null;
     return payload;
 }
@@ -44,10 +49,15 @@ export function requireUser(ctx) {
             const m = auth.match(/^Bearer\s+(.+)$/i);
             if (!m?.[1])
                 throw unauthorized("missing_auth", "Missing bearer token");
-            const claims = verifyAccessToken({ token: m[1], secret: ctx.config.JWT_SECRET, issuer: ctx.config.JWT_ISSUER });
+            const claims = verifyAccessToken({
+                token: m[1],
+                secret: ctx.config.JWT_SECRET,
+                issuer: ctx.config.JWT_ISSUER,
+                audience: ctx.config.JWT_AUDIENCE
+            });
             if (!claims)
                 throw unauthorized("invalid_token", "Invalid token");
-            req.auth = { userId: claims.sub, role: claims.role, sessionId: claims.sid, email: claims.email };
+            req.auth = { userId: claims.sub, role: claims.role, sessionId: claims.sid, email: claims.email, tenantId: claims.tid ?? "" };
             next();
         }
         catch (err) {
@@ -76,7 +86,7 @@ export function requireInstitutionApiKey(ctx) {
             if (!rawKey)
                 throw unauthorized("missing_api_key", "Missing API key");
             const keyHash = sha256Hex(rawKey);
-            const result = await ctx.pool.query("select k.id, k.institution_id, k.revoked_at, i.name, i.status from institution_api_keys k join institutions i on i.id = k.institution_id where k.key_hash=$1 limit 1", [keyHash]);
+            const result = await ctx.pool.query("select k.id, k.institution_id, k.revoked_at, i.name, i.status, i.tenant_id from institution_api_keys k join institutions i on i.id = k.institution_id where k.key_hash=$1 limit 1", [keyHash]);
             const row = result.rows[0];
             if (!row)
                 throw unauthorized("invalid_api_key", "Invalid API key");
@@ -84,7 +94,7 @@ export function requireInstitutionApiKey(ctx) {
                 throw unauthorized("revoked_api_key", "API key revoked");
             if (row.status !== "active")
                 throw unauthorized("inactive_institution", "Institution inactive");
-            req.institution = { id: row.institution_id, name: row.name, status: row.status, apiKeyId: row.id };
+            req.institution = { id: row.institution_id, name: row.name, status: row.status, apiKeyId: row.id, tenantId: row.tenant_id ?? "" };
             next();
         })().catch(next);
     };

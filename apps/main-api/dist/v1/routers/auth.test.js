@@ -15,7 +15,8 @@ void test("POST /forgot-password is always ok (no user)", async () => {
         logger,
         config: {
             JWT_SECRET: "x".repeat(32),
-            JWT_ISSUER: "",
+            JWT_ISSUER: "verza",
+            JWT_AUDIENCE: "verza",
             ACCESS_TOKEN_TTL_SECONDS: 900,
             REFRESH_TOKEN_TTL_SECONDS: 60 * 60 * 24 * 30,
             PASSWORD_RESET_BASE_URL: "",

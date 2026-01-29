@@ -11,11 +11,13 @@ export declare function createMainApiConfig(env: NodeJS.ProcessEnv): {
     DATABASE_URL: string;
     JWT_SECRET: string;
     JWT_ISSUER: string;
+    JWT_AUDIENCE: string;
     ACCESS_TOKEN_TTL_SECONDS: number;
     REFRESH_TOKEN_TTL_SECONDS: number;
     ENCRYPTION_MASTER_KEY_B64: string;
     RECEIPT_ED25519_SEED_B64: string;
     IDENTITY_RETENTION_DAYS: number;
+    REQUIRE_ADMIN_2FA: boolean;
     SMTP_SECURE: boolean;
     NODE_ENV?: string | undefined;
     REDIS_URL?: string | undefined;
@@ -38,7 +40,9 @@ export declare function createIdentityGatewayConfig(env: NodeJS.ProcessEnv): {
     LOG_LEVEL: string;
     METRICS_ENABLED: boolean;
     CORS_ALLOWED_ORIGINS: string[];
+    JWT_SECRET: string;
     JWT_ISSUER: string;
+    JWT_AUDIENCE: string;
     ORCHESTRATOR_URL: string;
     S3_ENDPOINT: string;
     S3_ACCESS_KEY_ID: string;
@@ -47,7 +51,9 @@ export declare function createIdentityGatewayConfig(env: NodeJS.ProcessEnv): {
     S3_REGION: string;
     S3_FORCE_PATH_STYLE: boolean;
     NODE_ENV?: string | undefined;
-    JWT_SECRET?: string | undefined;
+    ORCHESTRATOR_MTLS_CA_PATH?: string | undefined;
+    ORCHESTRATOR_MTLS_CERT_PATH?: string | undefined;
+    ORCHESTRATOR_MTLS_KEY_PATH?: string | undefined;
 };
 export declare function createIdentityOrchestratorConfig(env: NodeJS.ProcessEnv): {
     HOST: string;
@@ -57,10 +63,12 @@ export declare function createIdentityOrchestratorConfig(env: NodeJS.ProcessEnv)
     CORS_ALLOWED_ORIGINS: string[];
     JWT_SECRET: string;
     JWT_ISSUER: string;
+    JWT_AUDIENCE: string;
     IDENTITY_RETENTION_DAYS: number;
     S3_FORCE_PATH_STYLE: boolean;
     IDENTITY_DATABASE_URL: string;
     INFERENCE_URL: string;
+    TLS_REQUIRE_CLIENT_CERT: boolean;
     NODE_ENV?: string | undefined;
     REDIS_URL?: string | undefined;
     S3_ENDPOINT?: string | undefined;
@@ -68,5 +76,8 @@ export declare function createIdentityOrchestratorConfig(env: NodeJS.ProcessEnv)
     S3_SECRET_ACCESS_KEY?: string | undefined;
     S3_BUCKET?: string | undefined;
     S3_REGION?: string | undefined;
+    TLS_KEY_PATH?: string | undefined;
+    TLS_CERT_PATH?: string | undefined;
+    TLS_CA_PATH?: string | undefined;
 };
 //# sourceMappingURL=index.d.ts.map

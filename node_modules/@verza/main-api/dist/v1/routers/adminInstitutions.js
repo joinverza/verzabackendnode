@@ -33,7 +33,7 @@ const updateMemberSchema = z.object({
 });
 export function createAdminInstitutionsRouter(ctx) {
     const router = express.Router();
-    router.get("/", async (_req, res, next) => {
+    router.get("/", async (req, res, next) => {
         try {
             const result = await ctx.pool.query(`
         select
@@ -55,8 +55,9 @@ export function createAdminInstitutionsRouter(ctx) {
           from institution_api_keys
           group by institution_id
         ) k on k.institution_id = i.id
+        where i.tenant_id=$1
         order by i.created_at desc
-        `);
+        `, [req.auth.tenantId]);
             res.json(result.rows);
         }
         catch (err) {
@@ -68,8 +69,9 @@ export function createAdminInstitutionsRouter(ctx) {
             const body = createInstitutionSchema.parse(req.body ?? {});
             const id = crypto.randomUUID();
             const ts = new Date();
-            await ctx.pool.query("insert into institutions (id, name, status, created_at, updated_at) values ($1,$2,$3,$4,$5)", [
+            await ctx.pool.query("insert into institutions (id, tenant_id, name, status, created_at, updated_at) values ($1,$2,$3,$4,$5,$6)", [
                 id,
+                req.auth.tenantId,
                 body.name,
                 body.status ?? "active",
                 ts,
@@ -84,8 +86,9 @@ export function createAdminInstitutionsRouter(ctx) {
     router.get("/:institutionId", async (req, res, next) => {
         try {
             const { institutionId } = institutionIdSchema.parse(req.params);
-            const inst = await ctx.pool.query("select id,name,status,created_at,updated_at from institutions where id=$1 limit 1", [
-                institutionId
+            const inst = await ctx.pool.query("select id,name,status,created_at,updated_at from institutions where id=$1 and tenant_id=$2 limit 1", [
+                institutionId,
+                req.auth.tenantId
             ]);
             const row = inst.rows[0];
             if (!row)
@@ -100,10 +103,11 @@ export function createAdminInstitutionsRouter(ctx) {
         try {
             const { institutionId } = institutionIdSchema.parse(req.params);
             const body = setInstitutionStatusSchema.parse(req.body ?? {});
-            const updated = await ctx.pool.query("update institutions set status=$1, updated_at=$2 where id=$3", [
+            const updated = await ctx.pool.query("update institutions set status=$1, updated_at=$2 where id=$3 and tenant_id=$4", [
                 body.status,
                 new Date(),
-                institutionId
+                institutionId,
+                req.auth.tenantId
             ]);
             if (!updated.rowCount)
                 throw notFound("institution_not_found", "Institution not found");
@@ -116,7 +120,10 @@ export function createAdminInstitutionsRouter(ctx) {
     router.get("/:institutionId/api-keys", async (req, res, next) => {
         try {
             const { institutionId } = institutionIdSchema.parse(req.params);
-            const inst = await ctx.pool.query("select 1 as ok from institutions where id=$1 limit 1", [institutionId]);
+            const inst = await ctx.pool.query("select 1 as ok from institutions where id=$1 and tenant_id=$2 limit 1", [
+                institutionId,
+                req.auth.tenantId
+            ]);
             if (!inst.rowCount)
                 throw notFound("institution_not_found", "Institution not found");
             const result = await ctx.pool.query("select id, institution_id, name, last4, created_at, revoked_at from institution_api_keys where institution_id=$1 order by created_at desc", [institutionId]);
@@ -130,7 +137,10 @@ export function createAdminInstitutionsRouter(ctx) {
         try {
             const { institutionId } = institutionIdSchema.parse(req.params);
             const body = createApiKeySchema.parse(req.body ?? {});
-            const inst = await ctx.pool.query("select 1 as ok from institutions where id=$1 limit 1", [institutionId]);
+            const inst = await ctx.pool.query("select 1 as ok from institutions where id=$1 and tenant_id=$2 limit 1", [
+                institutionId,
+                req.auth.tenantId
+            ]);
             if (!inst.rowCount)
                 throw notFound("institution_not_found", "Institution not found");
             const rawKey = base64Url(crypto.randomBytes(32));
@@ -160,7 +170,10 @@ export function createAdminInstitutionsRouter(ctx) {
     router.get("/:institutionId/members", async (req, res, next) => {
         try {
             const { institutionId } = institutionIdSchema.parse(req.params);
-            const inst = await ctx.pool.query("select 1 as ok from institutions where id=$1 limit 1", [institutionId]);
+            const inst = await ctx.pool.query("select 1 as ok from institutions where id=$1 and tenant_id=$2 limit 1", [
+                institutionId,
+                req.auth.tenantId
+            ]);
             if (!inst.rowCount)
                 throw notFound("institution_not_found", "Institution not found");
             const result = await ctx.pool.query(`
@@ -188,7 +201,10 @@ export function createAdminInstitutionsRouter(ctx) {
         try {
             const { institutionId } = institutionIdSchema.parse(req.params);
             const body = addMemberSchema.parse(req.body ?? {});
-            const inst = await ctx.pool.query("select 1 as ok from institutions where id=$1 limit 1", [institutionId]);
+            const inst = await ctx.pool.query("select 1 as ok from institutions where id=$1 and tenant_id=$2 limit 1", [
+                institutionId,
+                req.auth.tenantId
+            ]);
             if (!inst.rowCount)
                 throw notFound("institution_not_found", "Institution not found");
             const user = await ctx.pool.query("select 1 as ok from users where id=$1 limit 1", [body.user_id]);
@@ -215,6 +231,12 @@ export function createAdminInstitutionsRouter(ctx) {
             const body = updateMemberSchema.parse(req.body ?? {});
             if (!body.role && !body.status)
                 throw badRequest("invalid_request", "Nothing to update");
+            const inst = await ctx.pool.query("select 1 as ok from institutions where id=$1 and tenant_id=$2 limit 1", [
+                institutionId,
+                req.auth.tenantId
+            ]);
+            if (!inst.rowCount)
+                throw notFound("institution_not_found", "Institution not found");
             const updated = await ctx.pool.query("update institution_members set role=coalesce($1,role), status=coalesce($2,status) where id=$3 and institution_id=$4", [body.role ?? null, body.status ?? null, memberId, institutionId]);
             if (!updated.rowCount)
                 throw notFound("member_not_found", "Member not found");

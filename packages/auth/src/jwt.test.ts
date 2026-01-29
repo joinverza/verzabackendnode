@@ -20,11 +20,12 @@ void test("verifyAccessToken accepts a valid token", () => {
   const secret = "s".repeat(32);
   const token = createAccessToken({
     secret,
-    issuer: "",
+    issuer: "verza",
+    audience: "verza",
     ttlSeconds: 900,
     claims: { sub: "u1", email: "u@example.com", role: "user", sid: "s1" }
   });
-  const claims = verifyAccessToken({ token, secret, issuer: "" });
+  const claims = verifyAccessToken({ token, secret, issuer: "verza", audience: "verza" });
   assert.ok(claims);
   assert.equal(claims.sub, "u1");
   assert.equal(claims.email, "u@example.com");
@@ -37,10 +38,11 @@ void test("verifyAccessToken rejects issuer mismatch", () => {
   const token = createAccessToken({
     secret,
     issuer: "iss",
+    audience: "aud",
     ttlSeconds: 900,
     claims: { sub: "u1", email: "u@example.com", role: "user", sid: "s1" }
   });
-  assert.equal(verifyAccessToken({ token, secret, issuer: "other" }), null);
+  assert.equal(verifyAccessToken({ token, secret, issuer: "other", audience: "aud" }), null);
 });
 
 void test("verifyAccessToken rejects exp at current time", () => {
@@ -51,7 +53,7 @@ void test("verifyAccessToken rejects exp at current time", () => {
     header: { alg: "HS256", typ: "JWT" },
     payload: { sub: "u1", email: "u@example.com", role: "user", sid: "s1", iat: now - 10, exp: now }
   });
-  assert.equal(verifyAccessToken({ token, secret, issuer: "" }), null);
+  assert.equal(verifyAccessToken({ token, secret, issuer: "verza", audience: "verza" }), null);
 });
 
 void test("verifyAccessToken rejects missing required claims", () => {
@@ -62,7 +64,7 @@ void test("verifyAccessToken rejects missing required claims", () => {
     header: { alg: "HS256", typ: "JWT" },
     payload: { sub: "u1", email: "u@example.com", role: "user", iat: now, exp: now + 60 }
   });
-  assert.equal(verifyAccessToken({ token, secret, issuer: "" }), null);
+  assert.equal(verifyAccessToken({ token, secret, issuer: "verza", audience: "verza" }), null);
 });
 
 void test("verifyAccessToken rejects wrong header values even if signature matches", () => {
@@ -73,24 +75,25 @@ void test("verifyAccessToken rejects wrong header values even if signature match
     header: { alg: "none", typ: "JWT" },
     payload: { sub: "u1", email: "u@example.com", role: "user", sid: "s1", iat: now, exp: now + 60 }
   });
-  assert.equal(verifyAccessToken({ token, secret, issuer: "" }), null);
+  assert.equal(verifyAccessToken({ token, secret, issuer: "verza", audience: "verza" }), null);
 });
 
 void test("verifyAccessToken rejects signature mismatch", () => {
   const secret = "s".repeat(32);
   const token = createAccessToken({
     secret,
-    issuer: "",
+    issuer: "verza",
+    audience: "verza",
     ttlSeconds: 900,
     claims: { sub: "u1", email: "u@example.com", role: "user", sid: "s1" }
   });
   const tampered = token.replace(/\.[^.]+$/, ".aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-  assert.equal(verifyAccessToken({ token: tampered, secret, issuer: "" }), null);
+  assert.equal(verifyAccessToken({ token: tampered, secret, issuer: "verza", audience: "verza" }), null);
 });
 
 void test("verifyAccessToken rejects malformed tokens", () => {
   const secret = "s".repeat(32);
-  assert.equal(verifyAccessToken({ token: "abc", secret, issuer: "" }), null);
-  assert.equal(verifyAccessToken({ token: "a.b.c.d", secret, issuer: "" }), null);
-  assert.equal(verifyAccessToken({ token: "!!..", secret, issuer: "" }), null);
+  assert.equal(verifyAccessToken({ token: "abc", secret, issuer: "verza", audience: "verza" }), null);
+  assert.equal(verifyAccessToken({ token: "a.b.c.d", secret, issuer: "verza", audience: "verza" }), null);
+  assert.equal(verifyAccessToken({ token: "!!..", secret, issuer: "verza", audience: "verza" }), null);
 });

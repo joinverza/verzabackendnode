@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import test from "node:test";
 
 import express from "express";
@@ -53,6 +54,7 @@ void test("identity verifications orchestrator flow via gateway", async () => {
       if (q.startsWith("insert into identity_verifications")) {
         const [
           id,
+          tenant_id,
           user_id,
           credential_id,
           status,
@@ -74,6 +76,7 @@ void test("identity verifications orchestrator flow via gateway", async () => {
         ] = params as any[];
         verificationsById.set(id, {
           id,
+          tenant_id,
           user_id,
           credential_id,
           status,
@@ -99,48 +102,52 @@ void test("identity verifications orchestrator flow via gateway", async () => {
       }
 
       if (q.startsWith("insert into identity_verification_audit_events")) {
-        const [id, verification_id, user_id, event_type, data_json, created_at] = params as any[];
+        const [id, tenant_id, verification_id, user_id, event_type, data_json, created_at] = params as any[];
         const arr = auditByVerification.get(verification_id) ?? [];
-        arr.push({ id, verification_id, user_id, event_type, data_json, created_at });
+        arr.push({ id, tenant_id, verification_id, user_id, event_type, data_json, created_at });
         auditByVerification.set(verification_id, arr);
         return { rowCount: 1, rows: [] };
       }
 
       if (q.startsWith("select id,user_id,credential_id,status,provider")) {
-        const [userId] = params as [string];
-        const rows = [...verificationsById.values()].filter((r) => r.user_id === userId);
+        const [tenantId, userId] = params as [string, string];
+        const rows = [...verificationsById.values()].filter((r) => r.tenant_id === tenantId && r.user_id === userId);
         return { rowCount: rows.length, rows };
       }
 
-      if (q.startsWith("select * from identity_verifications where id=$1")) {
-        const [id] = params as [string];
+      if (q.startsWith("select * from identity_verifications where id=$1 and tenant_id=$2")) {
+        const [id, tenantId] = params as [string, string];
         const row = verificationsById.get(id);
+        if (!row || row.tenant_id !== tenantId) return { rowCount: 0, rows: [] };
         return { rowCount: row ? 1 : 0, rows: row ? [row] : [] };
       }
 
-      if (q.startsWith("select provider, verifier_reference from identity_verifications where id=$1")) {
-        const [id] = params as [string];
+      if (q.startsWith("select provider, verifier_reference from identity_verifications where id=$1 and tenant_id=$2")) {
+        const [id, tenantId] = params as [string, string];
         const row = verificationsById.get(id);
+        if (!row || row.tenant_id !== tenantId) return { rowCount: 0, rows: [] };
         return { rowCount: row ? 1 : 0, rows: row ? [{ provider: row.provider, verifier_reference: row.verifier_reference }] : [] };
       }
 
-      if (q.startsWith("select status, provider, verifier_reference from identity_verifications where id=$1 and user_id=$2")) {
-        const [id, userId] = params as [string, string];
+      if (q.startsWith("select status, provider, verifier_reference from identity_verifications where id=$1 and tenant_id=$2")) {
+        const [id, tenantId] = params as [string, string];
         const row = verificationsById.get(id);
-        if (!row || row.user_id !== userId) return { rowCount: 0, rows: [] };
+        if (!row || row.tenant_id !== tenantId) return { rowCount: 0, rows: [] };
         return { rowCount: 1, rows: [{ status: row.status, provider: row.provider, verifier_reference: row.verifier_reference }] };
       }
 
       if (q.startsWith("select id,verification_id,user_id,event_type")) {
-        const [verificationId] = params as [string];
-        const rows = (auditByVerification.get(verificationId) ?? []).map((r) => ({
-          id: r.id,
-          verification_id: r.verification_id,
-          user_id: r.user_id,
-          event_type: r.event_type,
-          data_json: r.data_json,
-          created_at: r.created_at
-        }));
+        const [verificationId, tenantId] = params as [string, string];
+        const rows = (auditByVerification.get(verificationId) ?? [])
+          .filter((r) => r.tenant_id === tenantId)
+          .map((r) => ({
+            id: r.id,
+            verification_id: r.verification_id,
+            user_id: r.user_id,
+            event_type: r.event_type,
+            data_json: r.data_json,
+            created_at: r.created_at
+          }));
         return { rowCount: rows.length, rows };
       }
 
@@ -160,7 +167,7 @@ void test("identity verifications orchestrator flow via gateway", async () => {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    (req as any).auth = { userId: "user-1", role: "user", sessionId: "sess-1", email: "u@example.com" };
+    (req as any).auth = { userId: "user-1", role: "user", sessionId: "sess-1", email: "u@example.com", tenantId: "t-1" };
     next();
   });
 
@@ -189,6 +196,56 @@ void test("identity verifications orchestrator flow via gateway", async () => {
   const createdJson = (await created.json()) as any;
   assert.equal(createdJson.status, "pending");
   assert.equal(createdJson.verifier_reference, "prov-1");
+
+  const otherTenantVerificationId = crypto.randomUUID();
+  verificationsById.set(otherTenantVerificationId, {
+    id: otherTenantVerificationId,
+    tenant_id: "t-2",
+    user_id: "user-1",
+    credential_id: null,
+    status: "pending",
+    provider: "orchestrator",
+    document_type: "kyc",
+    confidence_threshold: 0.98,
+    scores_json: "{}",
+    reasons_json: "[]",
+    signals_json: "{}",
+    locale: "",
+    client_timestamp: null,
+    geo_lat: 0,
+    geo_lon: 0,
+    ip: "127.0.0.1",
+    user_agent: "x",
+    server_received_at: new Date(),
+    standard: "orchestrator_v2",
+    verifier_reference: "prov-1",
+    completed_at: null,
+    verifier_institution_id: null
+  });
+  const leaked = auditByVerification.get(createdJson.id) ?? [];
+  leaked.push({
+    id: crypto.randomUUID(),
+    tenant_id: "t-2",
+    verification_id: createdJson.id,
+    user_id: "user-1",
+    event_type: "leak_test",
+    data_json: "{}",
+    created_at: new Date()
+  });
+  auditByVerification.set(createdJson.id, leaked);
+
+  const list = await fetch(`${baseUrl}/identity/verifications`, {
+    headers: { authorization: "Bearer token" }
+  });
+  assert.equal(list.status, 200);
+  const listJson = (await list.json()) as any[];
+  assert.ok(listJson.some((v) => v.id === createdJson.id));
+  assert.ok(!listJson.some((v) => v.id === otherTenantVerificationId));
+
+  const getOtherTenant = await fetch(`${baseUrl}/identity/verifications/${otherTenantVerificationId}`, {
+    headers: { authorization: "Bearer token" }
+  });
+  assert.equal(getOtherTenant.status, 404);
 
   const presign = await fetch(`${baseUrl}/identity/verifications/${createdJson.id}/media/presign`, {
     method: "POST",
@@ -226,6 +283,14 @@ void test("identity verifications orchestrator flow via gateway", async () => {
   const auditJson = (await audit.json()) as any[];
   assert.ok(auditJson.some((e) => e.event_type === "requested"));
   assert.ok(auditJson.some((e) => e.event_type === "inference_completed"));
+  assert.ok(!auditJson.some((e) => e.event_type === "leak_test"));
+
+  const otherAudit = await fetch(`${baseUrl}/identity/verifications/${otherTenantVerificationId}/audit`, {
+    headers: { authorization: "Bearer token" }
+  });
+  assert.equal(otherAudit.status, 200);
+  const otherAuditJson = (await otherAudit.json()) as any[];
+  assert.equal(otherAuditJson.length, 0);
 
   assert.ok(gatewaySeen.some((x) => x.path === "/v1/verifications"));
   assert.ok(gatewaySeen.some((x) => x.path === "/v1/verifications/prov-1"));

@@ -19,6 +19,7 @@ export function createProofsRouter(ctx) {
         try {
             const body = generateSchema.parse(req.body);
             const created = await getOrCreateProofForCredential(ctx, {
+                tenantId: req.auth.tenantId,
                 userId: req.auth.userId,
                 credentialId: body.credential_id,
                 ...(body.type ? { type: body.type } : {})
@@ -42,7 +43,7 @@ export function createProofsRouter(ctx) {
     router.get("/:id", async (req, res, next) => {
         try {
             const { id } = proofIdSchema.parse(req.params);
-            const result = await ctx.pool.query("select id, user_id, credential_id, type, status, proof_json, created_at from proofs where id=$1 and user_id=$2 limit 1", [id, req.auth.userId]);
+            const result = await ctx.pool.query("select id, user_id, credential_id, type, status, proof_json, created_at from proofs where id=$1 and tenant_id=$2 and user_id=$3 limit 1", [id, req.auth.tenantId, req.auth.userId]);
             const row = result.rows[0];
             if (!row)
                 throw notFound("proof_not_found", "Proof not found");
@@ -55,12 +56,12 @@ export function createProofsRouter(ctx) {
     return router;
 }
 export async function getOrCreateProofForCredential(ctx, opts) {
-    const existing = await ctx.pool.query("select id, credential_id, type, status, proof_json, created_at from proofs where user_id=$1 and credential_id=$2 order by created_at desc limit 1", [opts.userId, opts.credentialId]);
+    const existing = await ctx.pool.query("select id, credential_id, type, status, proof_json, created_at from proofs where tenant_id=$1 and user_id=$2 and credential_id=$3 order by created_at desc limit 1", [opts.tenantId, opts.userId, opts.credentialId]);
     if (existing.rowCount) {
         const row = existing.rows[0];
         return { id: row.id, credential_id: row.credential_id, type: row.type, status: row.status, created_at: row.created_at.toISOString(), proof: safeJson(row.proof_json) };
     }
-    const credResult = await ctx.pool.query("select id, type, status, issuer_name, document_number, issue_date, expiry_date, issuing_authority, notes, encrypted_data from credentials where id=$1 and owner_user_id=$2 limit 1", [opts.credentialId, opts.userId]);
+    const credResult = await ctx.pool.query("select id, type, status, issuer_name, document_number, issue_date, expiry_date, issuing_authority, notes, encrypted_data from credentials where id=$1 and tenant_id=$2 and owner_user_id=$3 limit 1", [opts.credentialId, opts.tenantId, opts.userId]);
     const cred = credResult.rows[0];
     if (!cred)
         throw notFound("credential_not_found", "Credential not found");
@@ -70,7 +71,7 @@ export async function getOrCreateProofForCredential(ctx, opts) {
     const proof = buildProofPayload({ proofId, createdAt, proofType, userId: opts.userId, credential: cred });
     const signed = signReceipt({ seedB64: ctx.config.RECEIPT_ED25519_SEED_B64, receipt: proof });
     const proofEnvelope = { proof, ...signed };
-    await ctx.pool.query("insert into proofs (id, user_id, credential_id, type, status, proof_json, created_at) values ($1,$2,$3,$4,$5,$6,$7)", [proofId, opts.userId, opts.credentialId, proofType, "created", JSON.stringify(proofEnvelope), createdAt]);
+    await ctx.pool.query("insert into proofs (id, tenant_id, user_id, credential_id, type, status, proof_json, created_at) values ($1,$2,$3,$4,$5,$6,$7,$8)", [proofId, opts.tenantId, opts.userId, opts.credentialId, proofType, "created", JSON.stringify(proofEnvelope), createdAt]);
     return { id: proofId, credential_id: opts.credentialId, type: proofType, status: "created", created_at: createdAt.toISOString(), proof: proofEnvelope };
 }
 function buildProofPayload(opts) {

@@ -50,8 +50,9 @@ export function createIdentityVerificationsRouter(ctx) {
                 if (!providerReference)
                     throw badRequest("identity_gateway_error", "Failed to create verification");
             }
-            await ctx.pool.query("insert into identity_verifications (id,user_id,credential_id,status,provider,document_type,confidence_threshold,scores_json,reasons_json,signals_json,locale,client_timestamp,geo_lat,geo_lon,ip,user_agent,server_received_at,standard,verifier_reference) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)", [
+            await ctx.pool.query("insert into identity_verifications (id,tenant_id,user_id,credential_id,status,provider,document_type,confidence_threshold,scores_json,reasons_json,signals_json,locale,client_timestamp,geo_lat,geo_lon,ip,user_agent,server_received_at,standard,verifier_reference) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)", [
                 id,
+                req.auth.tenantId,
                 req.auth.userId,
                 body.credential_id ?? null,
                 "pending",
@@ -71,8 +72,9 @@ export function createIdentityVerificationsRouter(ctx) {
                 shouldUseOrchestrator ? "orchestrator_v2" : "",
                 providerReference
             ]);
-            await ctx.pool.query("insert into identity_verification_audit_events (id,verification_id,user_id,event_type,data_json,created_at) values ($1,$2,$3,$4,$5,$6)", [
+            await ctx.pool.query("insert into identity_verification_audit_events (id,tenant_id,verification_id,user_id,event_type,data_json,created_at) values ($1,$2,$3,$4,$5,$6,$7)", [
                 crypto.randomUUID(),
+                req.auth.tenantId,
                 id,
                 req.auth.userId,
                 "requested",
@@ -87,7 +89,7 @@ export function createIdentityVerificationsRouter(ctx) {
     });
     router.get("/", async (req, res, next) => {
         try {
-            const result = await ctx.pool.query("select id,user_id,credential_id,status,provider,document_type,confidence_threshold,locale,server_received_at,completed_at,verifier_institution_id,standard,verifier_reference from identity_verifications where user_id=$1 order by server_received_at desc", [req.auth.userId]);
+            const result = await ctx.pool.query("select id,user_id,credential_id,status,provider,document_type,confidence_threshold,locale,server_received_at,completed_at,verifier_institution_id,standard,verifier_reference from identity_verifications where tenant_id=$1 and user_id=$2 order by server_received_at desc", [req.auth.tenantId, req.auth.userId]);
             res.json(result.rows);
         }
         catch (err) {
@@ -98,8 +100,9 @@ export function createIdentityVerificationsRouter(ctx) {
         try {
             const { id } = idSchema.parse(req.params);
             const isAdmin = req.auth.role === "admin";
-            const result = await ctx.pool.query("select * from identity_verifications where id=$1 and ($2::boolean = true or user_id=$3) limit 1", [
+            const result = await ctx.pool.query("select * from identity_verifications where id=$1 and tenant_id=$2 and ($3::boolean = true or user_id=$4) limit 1", [
                 id,
+                req.auth.tenantId,
                 isAdmin,
                 req.auth.userId
             ]);
@@ -118,11 +121,7 @@ export function createIdentityVerificationsRouter(ctx) {
                 const remoteStatus = getStringProp(remote, "status") ?? "";
                 const mapped = mapOrchestratorStatus(remoteStatus);
                 if (mapped && mapped !== row.status) {
-                    await ctx.pool.query("update identity_verifications set status=$1, completed_at=case when $1<>'pending' then coalesce(completed_at,$2) else completed_at end where id=$3", [
-                        mapped,
-                        new Date(),
-                        id
-                    ]);
+                    await ctx.pool.query("update identity_verifications set status=$1, completed_at=case when $1<>'pending' then coalesce(completed_at,$2) else completed_at end where id=$3 and tenant_id=$4", [mapped, new Date(), id, req.auth.tenantId]);
                     row.status = mapped;
                 }
             }
@@ -141,10 +140,10 @@ export function createIdentityVerificationsRouter(ctx) {
         try {
             const { id } = idSchema.parse(req.params);
             const isAdmin = req.auth.role === "admin";
-            const result = await ctx.pool.query("select id,verification_id,user_id,event_type,data_json,created_at from identity_verification_audit_events where verification_id=$1 and ($2::boolean = true or user_id=$3) order by created_at asc", [id, isAdmin, req.auth.userId]);
+            const result = await ctx.pool.query("select id,verification_id,user_id,event_type,data_json,created_at from identity_verification_audit_events where verification_id=$1 and tenant_id=$2 and ($3::boolean = true or user_id=$4) order by created_at asc", [id, req.auth.tenantId, isAdmin, req.auth.userId]);
             const local = result.rows.map((r) => ({ ...r, data: safeJson(r.data_json) }));
             const gatewayUrl = String(ctx.config.IDENTITY_GATEWAY_URL ?? "").trim();
-            const verification = await ctx.pool.query("select provider, verifier_reference from identity_verifications where id=$1 and ($2::boolean = true or user_id=$3) limit 1", [id, isAdmin, req.auth.userId]);
+            const verification = await ctx.pool.query("select provider, verifier_reference from identity_verifications where id=$1 and tenant_id=$2 and ($3::boolean = true or user_id=$4) limit 1", [id, req.auth.tenantId, isAdmin, req.auth.userId]);
             const row = verification.rows[0];
             if (!row || row.provider !== "orchestrator" || !row.verifier_reference || !gatewayUrl.length) {
                 res.json(local);
@@ -179,7 +178,7 @@ export function createIdentityVerificationsRouter(ctx) {
             const gatewayUrl = String(ctx.config.IDENTITY_GATEWAY_URL ?? "").trim();
             if (!gatewayUrl.length)
                 throw badRequest("identity_gateway_not_configured", "Identity gateway not configured");
-            const ver = await ctx.pool.query("select provider, verifier_reference from identity_verifications where id=$1 and user_id=$2 limit 1", [id, req.auth.userId]);
+            const ver = await ctx.pool.query("select provider, verifier_reference from identity_verifications where id=$1 and tenant_id=$2 and user_id=$3 limit 1", [id, req.auth.tenantId, req.auth.userId]);
             const row = ver.rows[0];
             if (!row || row.provider !== "orchestrator" || !row.verifier_reference)
                 throw notFound("identity_verification_not_found", "Identity verification not found");
@@ -190,7 +189,7 @@ export function createIdentityVerificationsRouter(ctx) {
                 headers: passthroughHeaders(req),
                 body
             });
-            await ctx.pool.query("insert into identity_verification_audit_events (id,verification_id,user_id,event_type,data_json,created_at) values ($1,$2,$3,$4,$5,$6)", [crypto.randomUUID(), id, req.auth.userId, "media_presign", JSON.stringify({ key: body.key, content_type: body.content_type }), new Date()]);
+            await ctx.pool.query("insert into identity_verification_audit_events (id,tenant_id,verification_id,user_id,event_type,data_json,created_at) values ($1,$2,$3,$4,$5,$6,$7)", [crypto.randomUUID(), req.auth.tenantId, id, req.auth.userId, "media_presign", JSON.stringify({ key: body.key, content_type: body.content_type }), new Date()]);
             res.json(resp);
         }
         catch (err) {
@@ -204,7 +203,7 @@ export function createIdentityVerificationsRouter(ctx) {
             const gatewayUrl = String(ctx.config.IDENTITY_GATEWAY_URL ?? "").trim();
             if (!gatewayUrl.length)
                 throw badRequest("identity_gateway_not_configured", "Identity gateway not configured");
-            const ver = await ctx.pool.query("select provider, verifier_reference from identity_verifications where id=$1 and user_id=$2 limit 1", [id, req.auth.userId]);
+            const ver = await ctx.pool.query("select provider, verifier_reference from identity_verifications where id=$1 and tenant_id=$2 and user_id=$3 limit 1", [id, req.auth.tenantId, req.auth.userId]);
             const row = ver.rows[0];
             if (!row || row.provider !== "orchestrator" || !row.verifier_reference)
                 throw notFound("identity_verification_not_found", "Identity verification not found");
@@ -215,7 +214,7 @@ export function createIdentityVerificationsRouter(ctx) {
                 headers: passthroughHeaders(req),
                 body
             });
-            await ctx.pool.query("insert into identity_verification_audit_events (id,verification_id,user_id,event_type,data_json,created_at) values ($1,$2,$3,$4,$5,$6)", [crypto.randomUUID(), id, req.auth.userId, "media_added", JSON.stringify(body), new Date()]);
+            await ctx.pool.query("insert into identity_verification_audit_events (id,tenant_id,verification_id,user_id,event_type,data_json,created_at) values ($1,$2,$3,$4,$5,$6,$7)", [crypto.randomUUID(), req.auth.tenantId, id, req.auth.userId, "media_added", JSON.stringify(body), new Date()]);
             res.json(resp);
         }
         catch (err) {
@@ -228,7 +227,7 @@ export function createIdentityVerificationsRouter(ctx) {
             const gatewayUrl = String(ctx.config.IDENTITY_GATEWAY_URL ?? "").trim();
             if (!gatewayUrl.length)
                 throw badRequest("identity_gateway_not_configured", "Identity gateway not configured");
-            const ver = await ctx.pool.query("select provider, verifier_reference from identity_verifications where id=$1 and user_id=$2 limit 1", [id, req.auth.userId]);
+            const ver = await ctx.pool.query("select provider, verifier_reference from identity_verifications where id=$1 and tenant_id=$2 and user_id=$3 limit 1", [id, req.auth.tenantId, req.auth.userId]);
             const row = ver.rows[0];
             if (!row || row.provider !== "orchestrator" || !row.verifier_reference)
                 throw notFound("identity_verification_not_found", "Identity verification not found");
@@ -241,7 +240,7 @@ export function createIdentityVerificationsRouter(ctx) {
                 method: "POST",
                 headers: { ...passthroughHeaders(req), ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}) }
             });
-            await ctx.pool.query("insert into identity_verification_audit_events (id,verification_id,user_id,event_type,data_json,created_at) values ($1,$2,$3,$4,$5,$6)", [crypto.randomUUID(), id, req.auth.userId, "run_requested", JSON.stringify({ async: isAsync }), new Date()]);
+            await ctx.pool.query("insert into identity_verification_audit_events (id,tenant_id,verification_id,user_id,event_type,data_json,created_at) values ($1,$2,$3,$4,$5,$6,$7)", [crypto.randomUUID(), req.auth.tenantId, id, req.auth.userId, "run_requested", JSON.stringify({ async: isAsync }), new Date()]);
             res.json(resp);
         }
         catch (err) {
@@ -255,13 +254,13 @@ export function createIdentityVerificationsRouter(ctx) {
             const now = new Date();
             if (req.auth.role !== "admin")
                 throw forbidden("forbidden", "Admin required");
-            const existing = await ctx.pool.query("select id,user_id,status from identity_verifications where id=$1 limit 1", [id]);
+            const existing = await ctx.pool.query("select id,user_id,status from identity_verifications where id=$1 and tenant_id=$2 limit 1", [id, req.auth.tenantId]);
             const row = existing.rows[0];
             if (!row)
                 throw notFound("identity_verification_not_found", "Identity verification not found");
             if (row.status !== "pending")
                 throw badRequest("invalid_status_transition", "Only pending verifications can be completed");
-            await ctx.pool.query("update identity_verifications set status=$1, scores_json=$2, reasons_json=$3, signals_json=$4, completed_at=$5, verifier_institution_id=coalesce($6,verifier_institution_id), standard=coalesce($7,standard), verifier_reference=coalesce($8,verifier_reference) where id=$9", [
+            await ctx.pool.query("update identity_verifications set status=$1, scores_json=$2, reasons_json=$3, signals_json=$4, completed_at=$5, verifier_institution_id=coalesce($6,verifier_institution_id), standard=coalesce($7,standard), verifier_reference=coalesce($8,verifier_reference) where id=$9 and tenant_id=$10", [
                 body.status,
                 JSON.stringify(body.scores),
                 JSON.stringify(body.reasons),
@@ -270,10 +269,12 @@ export function createIdentityVerificationsRouter(ctx) {
                 body.verifier_institution_id ?? null,
                 body.standard ?? null,
                 body.verifier_reference ?? null,
-                id
+                id,
+                req.auth.tenantId
             ]);
-            await ctx.pool.query("insert into identity_verification_audit_events (id,verification_id,user_id,event_type,data_json,created_at) values ($1,$2,$3,$4,$5,$6)", [
+            await ctx.pool.query("insert into identity_verification_audit_events (id,tenant_id,verification_id,user_id,event_type,data_json,created_at) values ($1,$2,$3,$4,$5,$6,$7)", [
                 crypto.randomUUID(),
+                req.auth.tenantId,
                 id,
                 row.user_id,
                 "completed_admin",
@@ -290,7 +291,7 @@ export function createIdentityVerificationsRouter(ctx) {
         try {
             const { id } = idSchema.parse(req.params);
             const isAdmin = req.auth.role === "admin";
-            const result = await ctx.pool.query("select status, provider, verifier_reference from identity_verifications where id=$1 and user_id=$2 limit 1", [id, req.auth.userId]);
+            const result = await ctx.pool.query("select status, provider, verifier_reference from identity_verifications where id=$1 and tenant_id=$2 and ($3::boolean = true or user_id=$4) limit 1", [id, req.auth.tenantId, isAdmin, req.auth.userId]);
             const row = result.rows[0];
             if (row) {
                 const gatewayUrl = String(ctx.config.IDENTITY_GATEWAY_URL ?? "").trim();
@@ -304,11 +305,7 @@ export function createIdentityVerificationsRouter(ctx) {
                     const remoteStatus = getStringProp(remote, "status") ?? "";
                     const mapped = mapOrchestratorStatus(remoteStatus);
                     if (mapped && mapped !== row.status) {
-                        await ctx.pool.query("update identity_verifications set status=$1, completed_at=case when $1<>'pending' then coalesce(completed_at,$2) else completed_at end where id=$3", [
-                            mapped,
-                            new Date(),
-                            id
-                        ]);
+                        await ctx.pool.query("update identity_verifications set status=$1, completed_at=case when $1<>'pending' then coalesce(completed_at,$2) else completed_at end where id=$3 and tenant_id=$4", [mapped, new Date(), id, req.auth.tenantId]);
                         res.json({ id, status: mapped });
                         return;
                     }
@@ -318,7 +315,10 @@ export function createIdentityVerificationsRouter(ctx) {
             }
             if (!isAdmin)
                 throw notFound("identity_verification_not_found", "Identity verification not found");
-            const adminResult = await ctx.pool.query("select status from identity_verifications where id=$1 limit 1", [id]);
+            const adminResult = await ctx.pool.query("select status from identity_verifications where id=$1 and tenant_id=$2 limit 1", [
+                id,
+                req.auth.tenantId
+            ]);
             const adminRow = adminResult.rows[0];
             if (!adminRow)
                 throw notFound("identity_verification_not_found", "Identity verification not found");
@@ -332,13 +332,10 @@ export function createIdentityVerificationsRouter(ctx) {
         try {
             const { id } = idSchema.parse(req.params);
             const now = new Date();
-            const updated = await ctx.pool.query("update identity_verifications set status='cancelled' where id=$1 and user_id=$2 and status='pending'", [
-                id,
-                req.auth.userId
-            ]);
+            const updated = await ctx.pool.query("update identity_verifications set status='cancelled' where id=$1 and tenant_id=$2 and user_id=$3 and status='pending'", [id, req.auth.tenantId, req.auth.userId]);
             if (!updated.rowCount)
                 throw notFound("identity_verification_not_found", "Identity verification not found");
-            await ctx.pool.query("insert into identity_verification_audit_events (id,verification_id,user_id,event_type,data_json,created_at) values ($1,$2,$3,$4,$5,$6)", [crypto.randomUUID(), id, req.auth.userId, "cancelled", "{}", now]);
+            await ctx.pool.query("insert into identity_verification_audit_events (id,tenant_id,verification_id,user_id,event_type,data_json,created_at) values ($1,$2,$3,$4,$5,$6,$7)", [crypto.randomUUID(), req.auth.tenantId, id, req.auth.userId, "cancelled", "{}", now]);
             res.json({ status: "ok" });
         }
         catch (err) {
