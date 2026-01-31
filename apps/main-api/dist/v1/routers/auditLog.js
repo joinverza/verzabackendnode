@@ -165,7 +165,13 @@ export function sanitizeAuditData(input) {
             }
             return out;
         }
-        return String(v);
+        if (typeof v === "bigint")
+            return v.toString();
+        if (typeof v === "symbol")
+            return v.description ?? v.toString();
+        if (typeof v === "function")
+            return "[function]";
+        return typeof v;
     };
     const sanitized = walk(input, 0);
     const json = canonicalJson(sanitized);

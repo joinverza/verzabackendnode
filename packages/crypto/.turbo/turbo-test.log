@@ -6,25 +6,25 @@ TAP version 13
 # Subtest: verifyDidSignedRequest accepts a valid did:jwk signature
 ok 1 - verifyDidSignedRequest accepts a valid did:jwk signature
   ---
-  duration_ms: 15.1938
+  duration_ms: 49.0167
   type: 'test'
   ...
 # Subtest: verifyDidSignedRequest rejects mismatched body
 ok 2 - verifyDidSignedRequest rejects mismatched body
   ---
-  duration_ms: 1.9641
+  duration_ms: 2.2638
   type: 'test'
   ...
 # Subtest: verifyDidSignedRequest rejects old timestamps
 ok 3 - verifyDidSignedRequest rejects old timestamps
   ---
-  duration_ms: 1.0632
+  duration_ms: 1.2345
   type: 'test'
   ...
 # Subtest: verifyDidSignedRequest rejects future timestamps
 ok 4 - verifyDidSignedRequest rejects future timestamps
   ---
-  duration_ms: 1.9235
+  duration_ms: 1.357
   type: 'test'
   ...
 1..4
@@ -35,4 +35,4 @@ ok 4 - verifyDidSignedRequest rejects future timestamps
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 909.3024
+# duration_ms 1309.4198

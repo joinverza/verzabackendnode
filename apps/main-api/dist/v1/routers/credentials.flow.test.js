@@ -36,7 +36,7 @@ void test("credentials: store encrypts and get decrypts roundtrip", async () => 
                 return { rowCount: 1, rows: [] };
             }
             if (q.startsWith("update audit_chains set next_seq=next_seq+1, head_hash=$1, updated_at=$2 where tenant_id=$3 and stream=$4")) {
-                const [headHash, _updatedAt, tenantId, stream] = params;
+                const [headHash, , tenantId, stream] = params;
                 const key = `${tenantId}:${stream}`;
                 const row = auditChains.get(key) ?? { next_seq: 1, head_hash: "" };
                 auditChains.set(key, { next_seq: row.next_seq + 1, head_hash: headHash });

@@ -151,7 +151,7 @@ export function createAdminComplianceRouter(ctx) {
             const id = crypto.randomUUID();
             const createdAtMs = Date.now();
             const createdAt = new Date(createdAtMs);
-            let blobB64 = body.blob_b64 ?? "";
+            const blobB64 = body.blob_b64 ?? "";
             let contentSha = body.content_sha256 ?? "";
             if (blobB64) {
                 const buf = safeB64ToBuf(blobB64);
