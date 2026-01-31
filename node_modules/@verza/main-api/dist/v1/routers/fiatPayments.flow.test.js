@@ -267,7 +267,13 @@ void test("admin/bridge: auth required and workflows behave", async () => {
         issuer: "verza",
         audience: "verza",
         ttlSeconds: 900,
-        claims: { sub: "00000000-0000-0000-0000-000000000001", email: "a@example.com", role: "admin", sid: "s1" }
+        claims: {
+            sub: "00000000-0000-0000-0000-000000000001",
+            email: "a@example.com",
+            role: "admin",
+            sid: "s1",
+            tid: "00000000-0000-0000-0000-000000000001"
+        }
     });
     const txId = "00000000-0000-0000-0000-000000000201";
     const txs = new Map();
@@ -284,6 +290,36 @@ void test("admin/bridge: auth required and workflows behave", async () => {
     const pool = {
         query: async (sql, params = []) => {
             const q = sql.replace(/\s+/g, " ").trim().toLowerCase();
+            const auditChains = pool._auditChains ?? new Map();
+            pool._auditChains = auditChains;
+            if (q === "begin" || q === "commit" || q === "rollback") {
+                return { rowCount: 0, rows: [] };
+            }
+            if (q.startsWith("select next_seq, head_hash from audit_chains where tenant_id=$1 and stream=$2")) {
+                const [tenantId, stream] = params;
+                const key = `${tenantId}:${stream}`;
+                const row = auditChains.get(key);
+                if (!row)
+                    return { rowCount: 0, rows: [] };
+                return { rowCount: 1, rows: [{ next_seq: row.next_seq, head_hash: row.head_hash }] };
+            }
+            if (q.startsWith("insert into audit_chains (tenant_id, stream, next_seq, head_hash, updated_at) values")) {
+                const [tenantId, stream] = params;
+                const key = `${tenantId}:${stream}`;
+                if (!auditChains.has(key))
+                    auditChains.set(key, { next_seq: 1, head_hash: "" });
+                return { rowCount: 1, rows: [] };
+            }
+            if (q.startsWith("update audit_chains set next_seq=next_seq+1, head_hash=$1, updated_at=$2 where tenant_id=$3 and stream=$4")) {
+                const [headHash, , tenantId, stream] = params;
+                const key = `${tenantId}:${stream}`;
+                const row = auditChains.get(key) ?? { next_seq: 1, head_hash: "" };
+                auditChains.set(key, { next_seq: row.next_seq + 1, head_hash: headHash });
+                return { rowCount: 1, rows: [] };
+            }
+            if (q.startsWith("insert into audit_events (id,tenant_id,stream,seq,prev_hash,event_hash,event_type")) {
+                return { rowCount: 1, rows: [] };
+            }
             if (q.startsWith("select id, midnight_tx_hash") && q.includes("where id=$1")) {
                 const [id] = params;
                 const row = txs.get(id);
@@ -363,7 +399,13 @@ void test("admin/institutions: api keys and members workflows behave", async () 
         issuer: "verza",
         audience: "verza",
         ttlSeconds: 900,
-        claims: { sub: "00000000-0000-0000-0000-000000000001", email: "a@example.com", role: "admin", sid: "s1", tid: "t-1" }
+        claims: {
+            sub: "00000000-0000-0000-0000-000000000001",
+            email: "a@example.com",
+            role: "admin",
+            sid: "s1",
+            tid: "00000000-0000-0000-0000-000000000001"
+        }
     });
     const institutions = new Map();
     const apiKeys = new Map();
@@ -375,6 +417,36 @@ void test("admin/institutions: api keys and members workflows behave", async () 
     const pool = {
         query: async (sql, params = []) => {
             const q = sql.replace(/\s+/g, " ").trim().toLowerCase();
+            const auditChains = pool._auditChains ?? new Map();
+            pool._auditChains = auditChains;
+            if (q === "begin" || q === "commit" || q === "rollback") {
+                return { rowCount: 0, rows: [] };
+            }
+            if (q.startsWith("select next_seq, head_hash from audit_chains where tenant_id=$1 and stream=$2")) {
+                const [tenantId, stream] = params;
+                const key = `${tenantId}:${stream}`;
+                const row = auditChains.get(key);
+                if (!row)
+                    return { rowCount: 0, rows: [] };
+                return { rowCount: 1, rows: [{ next_seq: row.next_seq, head_hash: row.head_hash }] };
+            }
+            if (q.startsWith("insert into audit_chains (tenant_id, stream, next_seq, head_hash, updated_at) values")) {
+                const [tenantId, stream] = params;
+                const key = `${tenantId}:${stream}`;
+                if (!auditChains.has(key))
+                    auditChains.set(key, { next_seq: 1, head_hash: "" });
+                return { rowCount: 1, rows: [] };
+            }
+            if (q.startsWith("update audit_chains set next_seq=next_seq+1, head_hash=$1, updated_at=$2 where tenant_id=$3 and stream=$4")) {
+                const [headHash, , tenantId, stream] = params;
+                const key = `${tenantId}:${stream}`;
+                const row = auditChains.get(key) ?? { next_seq: 1, head_hash: "" };
+                auditChains.set(key, { next_seq: row.next_seq + 1, head_hash: headHash });
+                return { rowCount: 1, rows: [] };
+            }
+            if (q.startsWith("insert into audit_events (id,tenant_id,stream,seq,prev_hash,event_hash,event_type")) {
+                return { rowCount: 1, rows: [] };
+            }
             if (q.includes("from institutions i") && q.includes("left join")) {
                 const [tenantId] = params;
                 const rows = Array.from(institutions.values())

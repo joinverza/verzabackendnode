@@ -66,6 +66,39 @@ export type AuthContext = {
   config: { JWT_SECRET: string; JWT_ISSUER: string; JWT_AUDIENCE: string };
 };
 
+export const PERMISSIONS = {
+  ADMIN_BRIDGE_TRANSACTIONS_LIST: "admin.bridge.transactions.list",
+  ADMIN_BRIDGE_TRANSACTION_READ: "admin.bridge.transactions.read",
+  ADMIN_BRIDGE_TRANSACTION_STATUS_SET: "admin.bridge.transactions.status.set",
+  ADMIN_BRIDGE_TRANSACTION_RETRY: "admin.bridge.transactions.retry",
+  ADMIN_BRIDGE_CREDENTIAL_METADATA_READ: "admin.bridge.credential_metadata.read",
+  ADMIN_BRIDGE_CREDENTIAL_METADATA_UPSERT: "admin.bridge.credential_metadata.upsert",
+
+  ADMIN_INSTITUTIONS_LIST: "admin.institutions.list",
+  ADMIN_INSTITUTIONS_CREATE: "admin.institutions.create",
+  ADMIN_INSTITUTIONS_READ: "admin.institutions.read",
+  ADMIN_INSTITUTIONS_STATUS_SET: "admin.institutions.status.set",
+  ADMIN_INSTITUTIONS_API_KEYS_LIST: "admin.institutions.api_keys.list",
+  ADMIN_INSTITUTIONS_API_KEYS_CREATE: "admin.institutions.api_keys.create",
+  ADMIN_INSTITUTIONS_API_KEYS_REVOKE: "admin.institutions.api_keys.revoke",
+  ADMIN_INSTITUTIONS_MEMBERS_LIST: "admin.institutions.members.list",
+  ADMIN_INSTITUTIONS_MEMBERS_UPSERT: "admin.institutions.members.upsert",
+  ADMIN_INSTITUTIONS_MEMBERS_UPDATE: "admin.institutions.members.update",
+
+  ADMIN_COMPLIANCE_AUDIT_HEAD_READ: "admin.compliance.audit.head.read",
+  ADMIN_COMPLIANCE_AUDIT_EVENTS_LIST: "admin.compliance.audit.events.list",
+  ADMIN_COMPLIANCE_AUDIT_EXPORT: "admin.compliance.audit.export",
+  ADMIN_COMPLIANCE_AUDIT_VERIFY: "admin.compliance.audit.verify",
+  ADMIN_COMPLIANCE_REPORTS_SUMMARY_READ: "admin.compliance.reports.summary.read",
+  ADMIN_COMPLIANCE_EVIDENCE_CREATE: "admin.compliance.evidence.create",
+  ADMIN_COMPLIANCE_EVIDENCE_READ: "admin.compliance.evidence.read",
+  ADMIN_COMPLIANCE_PRIVACY_REQUESTS_LIST: "admin.compliance.privacy.requests.list",
+  ADMIN_COMPLIANCE_RETENTION_POLICY_SET: "admin.compliance.privacy.retention.set",
+  ADMIN_COMPLIANCE_RETENTION_RUN: "admin.compliance.privacy.retention.run"
+} as const;
+
+export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
+
 export function requireUser(ctx: AuthContext): RequestHandler {
   return (req, _res, next) => {
     try {
@@ -96,6 +129,32 @@ export function requireAdmin(ctx: AuthContext): RequestHandler {
       next();
     });
   };
+}
+
+export type RequirePermissionArgs = {
+  action: Permission;
+  tenantId?: (req: Parameters<RequestHandler>[0]) => string | null;
+};
+
+export function requirePermission(ctx: AuthContext, args: RequirePermissionArgs): RequestHandler {
+  const ensure = requireUser(ctx);
+  return (req, res, next) => {
+    const done = (err?: unknown) => {
+      if (err) return next(err);
+      if (!isActionAllowed(req.auth.role, args.action)) return next(forbidden("forbidden", "Permission denied"));
+      const actionTenantId = args.tenantId ? args.tenantId(req) : null;
+      if (actionTenantId && req.auth.tenantId && actionTenantId !== req.auth.tenantId) return next(forbidden("forbidden", "Cross-tenant access denied"));
+      next();
+    };
+
+    const hasAuth = Boolean((req as any)?.auth?.userId);
+    if (hasAuth) return done();
+    ensure(req, res, done);
+  };
+}
+
+function isActionAllowed(role: string, action: Permission) {
+  return role === "admin" && action.length > 0;
 }
 
 export type InstitutionAuthContext = {

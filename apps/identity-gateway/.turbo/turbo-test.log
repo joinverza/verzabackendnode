@@ -3,12 +3,12 @@
 > node --test --test-force-exit dist/**/*.test.js
 
 TAP version 13
-# {"level":30,"time":1769878044605,"service":"identity-gateway","addr":{"address":"127.0.0.1","family":"IPv4","port":64242},"msg":"identity-gateway listening"}
-# {"level":30,"time":1769878044919,"service":"identity-gateway","req":{"id":1,"method":"POST","url":"/v1/sessions","query":{},"params":{},"headers":{"host":"127.0.0.1:64242","connection":"keep-alive","content-type":"application/json","x-request-id":"rid","traceparent":"00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01","authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ2ZXJ6YSIsImF1ZCI6InZlcnphIiwic3ViIjoidTEiLCJlbWFpbCI6InUxQGV4YW1wbGUuY29tIiwicm9sZSI6InVzZXIiLCJzaWQiOiJzMSIsInRpZCI6InQtMSIsImlhdCI6MTc2OTg3ODA0NCwiZXhwIjoxNzY5ODc4OTQ0fQ.q4Qzm4V76g6yKKzCyAPZ_NO2AmNva9udJTQ79Xrckuo","accept":"*/*","accept-language":"*","sec-fetch-mode":"cors","user-agent":"node","accept-encoding":"gzip, deflate","content-length":"16"},"remoteAddress":"127.0.0.1","remotePort":64243},"request_id":"rid","res":{"statusCode":200,"headers":{"x-powered-by":"Express","x-request-id":"rid","vary":"Origin","access-control-allow-credentials":"true","ratelimit-policy":"60;w=60","ratelimit-limit":"60","ratelimit-remaining":"59","ratelimit-reset":"60","content-type":"application/json; charset=utf-8","content-length":"25","etag":"W/\\"19-Q8OtLVAAj8lm7sI/nBjoabn3EJk\\""}},"responseTime":157,"msg":"request completed"}
+# {"level":30,"time":1769881755212,"service":"identity-gateway","addr":{"address":"127.0.0.1","family":"IPv4","port":61126},"msg":"identity-gateway listening"}
+# {"level":30,"time":1769881755414,"service":"identity-gateway","req":{"id":1,"method":"POST","url":"/v1/sessions","query":{},"params":{},"headers":{"host":"127.0.0.1:61126","connection":"keep-alive","content-type":"application/json","x-request-id":"rid","traceparent":"00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01","authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ2ZXJ6YSIsImF1ZCI6InZlcnphIiwic3ViIjoidTEiLCJlbWFpbCI6InUxQGV4YW1wbGUuY29tIiwicm9sZSI6InVzZXIiLCJzaWQiOiJzMSIsInRpZCI6InQtMSIsImlhdCI6MTc2OTg4MTc1NSwiZXhwIjoxNzY5ODgyNjU1fQ.uo4kHmdX8RAba5w3YkKeJnsjJg3peWqtgUh1Os6YgKQ","accept":"*/*","accept-language":"*","sec-fetch-mode":"cors","user-agent":"node","accept-encoding":"gzip, deflate","content-length":"16"},"remoteAddress":"127.0.0.1","remotePort":61127},"request_id":"rid","res":{"statusCode":200,"headers":{"x-powered-by":"Express","x-request-id":"rid","vary":"Origin","access-control-allow-credentials":"true","ratelimit-policy":"60;w=60","ratelimit-limit":"60","ratelimit-remaining":"59","ratelimit-reset":"60","content-type":"application/json; charset=utf-8","content-length":"25","etag":"W/\\"19-Q8OtLVAAj8lm7sI/nBjoabn3EJk\\""}},"responseTime":106,"msg":"request completed"}
 # Subtest: identity-gateway proxies sessions and passes key headers
 ok 1 - identity-gateway proxies sessions and passes key headers
   ---
-  duration_ms: 513.159
+  duration_ms: 378.6057
   type: 'test'
   ...
 1..1
@@ -19,4 +19,4 @@ ok 1 - identity-gateway proxies sessions and passes key headers
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 4553.8143
+# duration_ms 3520.2435

@@ -5,10 +5,12 @@ import crypto from "node:crypto";
 import express from "express";
 import { z } from "zod";
 
+import { PERMISSIONS, requirePermission } from "@verza/auth";
 import { sha256Hex } from "@verza/crypto";
 import { badRequest, notFound } from "@verza/http";
 
 import type { MainApiContext } from "../routes.js";
+import { appendAuditEvent } from "./auditLog.js";
 
 const createInstitutionSchema = z.object({
   name: z.string().min(1),
@@ -49,7 +51,7 @@ const updateMemberSchema = z.object({
 export function createAdminInstitutionsRouter(ctx: MainApiContext): Router {
   const router = express.Router();
 
-  router.get("/", async (req, res, next) => {
+  router.get("/", requirePermission(ctx, { action: PERMISSIONS.ADMIN_INSTITUTIONS_LIST }), async (req, res, next) => {
     try {
       const result = await ctx.pool.query(
         `
@@ -78,13 +80,22 @@ export function createAdminInstitutionsRouter(ctx: MainApiContext): Router {
         ,
         [req.auth.tenantId]
       );
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "admin_institutions_listed",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "institutions",
+        subjectId: "list",
+        data: { count: result.rows.length }
+      });
       res.json(result.rows);
     } catch (err) {
       next(err);
     }
   });
 
-  router.post("/", async (req, res, next) => {
+  router.post("/", requirePermission(ctx, { action: PERMISSIONS.ADMIN_INSTITUTIONS_CREATE }), async (req, res, next) => {
     try {
       const body = createInstitutionSchema.parse(req.body ?? {});
       const id = crypto.randomUUID();
@@ -97,13 +108,22 @@ export function createAdminInstitutionsRouter(ctx: MainApiContext): Router {
         ts,
         ts
       ]);
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "admin_institution_created",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "institution",
+        subjectId: id,
+        data: { name: body.name, status: body.status ?? "active" }
+      });
       res.status(201).json({ id });
     } catch (err) {
       next(err);
     }
   });
 
-  router.get("/:institutionId", async (req, res, next) => {
+  router.get("/:institutionId", requirePermission(ctx, { action: PERMISSIONS.ADMIN_INSTITUTIONS_READ }), async (req, res, next) => {
     try {
       const { institutionId } = institutionIdSchema.parse(req.params);
       const inst = await ctx.pool.query("select id,name,status,created_at,updated_at from institutions where id=$1 and tenant_id=$2 limit 1", [
@@ -112,13 +132,22 @@ export function createAdminInstitutionsRouter(ctx: MainApiContext): Router {
       ]);
       const row = inst.rows[0];
       if (!row) throw notFound("institution_not_found", "Institution not found");
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "admin_institution_viewed",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "institution",
+        subjectId: institutionId,
+        data: {}
+      });
       res.json(row);
     } catch (err) {
       next(err);
     }
   });
 
-  router.post("/:institutionId/status", async (req, res, next) => {
+  router.post("/:institutionId/status", requirePermission(ctx, { action: PERMISSIONS.ADMIN_INSTITUTIONS_STATUS_SET }), async (req, res, next) => {
     try {
       const { institutionId } = institutionIdSchema.parse(req.params);
       const body = setInstitutionStatusSchema.parse(req.body ?? {});
@@ -129,13 +158,22 @@ export function createAdminInstitutionsRouter(ctx: MainApiContext): Router {
         req.auth.tenantId
       ]);
       if (!updated.rowCount) throw notFound("institution_not_found", "Institution not found");
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "admin_institution_status_set",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "institution",
+        subjectId: institutionId,
+        data: { status: body.status }
+      });
       res.json({ status: "ok" });
     } catch (err) {
       next(err);
     }
   });
 
-  router.get("/:institutionId/api-keys", async (req, res, next) => {
+  router.get("/:institutionId/api-keys", requirePermission(ctx, { action: PERMISSIONS.ADMIN_INSTITUTIONS_API_KEYS_LIST }), async (req, res, next) => {
     try {
       const { institutionId } = institutionIdSchema.parse(req.params);
       const inst = await ctx.pool.query<{ ok: number }>("select 1 as ok from institutions where id=$1 and tenant_id=$2 limit 1", [
@@ -147,13 +185,22 @@ export function createAdminInstitutionsRouter(ctx: MainApiContext): Router {
         "select id, institution_id, name, last4, created_at, revoked_at from institution_api_keys where institution_id=$1 order by created_at desc",
         [institutionId]
       );
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "admin_institution_api_keys_listed",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "institution",
+        subjectId: institutionId,
+        data: { count: result.rows.length }
+      });
       res.json(result.rows);
     } catch (err) {
       next(err);
     }
   });
 
-  router.post("/:institutionId/api-keys", async (req, res, next) => {
+  router.post("/:institutionId/api-keys", requirePermission(ctx, { action: PERMISSIONS.ADMIN_INSTITUTIONS_API_KEYS_CREATE }), async (req, res, next) => {
     try {
       const { institutionId } = institutionIdSchema.parse(req.params);
       const body = createApiKeySchema.parse(req.body ?? {});
@@ -171,13 +218,25 @@ export function createAdminInstitutionsRouter(ctx: MainApiContext): Router {
         "insert into institution_api_keys (id, institution_id, name, key_hash, last4, created_at) values ($1,$2,$3,$4,$5,$6)",
         [id, institutionId, body.name ?? "admin_created", keyHash, last4, new Date()]
       );
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "admin_institution_api_key_created",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "institution_api_key",
+        subjectId: id,
+        data: { institution_id: institutionId, name: body.name ?? "admin_created", last4 }
+      });
       res.status(201).json({ id, api_key: rawKey, last4 });
     } catch (err) {
       next(err);
     }
   });
 
-  router.post("/:institutionId/api-keys/:apiKeyId/revoke", async (req, res, next) => {
+  router.post(
+    "/:institutionId/api-keys/:apiKeyId/revoke",
+    requirePermission(ctx, { action: PERMISSIONS.ADMIN_INSTITUTIONS_API_KEYS_REVOKE }),
+    async (req, res, next) => {
     try {
       const { institutionId, apiKeyId } = apiKeyIdParamsSchema.parse(req.params);
       const now = new Date();
@@ -186,13 +245,23 @@ export function createAdminInstitutionsRouter(ctx: MainApiContext): Router {
         [now, apiKeyId, institutionId]
       );
       if (!updated.rowCount) throw notFound("api_key_not_found", "API key not found");
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "admin_institution_api_key_revoked",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "institution_api_key",
+        subjectId: apiKeyId,
+        data: { institution_id: institutionId }
+      });
       res.json({ status: "ok" });
     } catch (err) {
       next(err);
     }
-  });
+  }
+  );
 
-  router.get("/:institutionId/members", async (req, res, next) => {
+  router.get("/:institutionId/members", requirePermission(ctx, { action: PERMISSIONS.ADMIN_INSTITUTIONS_MEMBERS_LIST }), async (req, res, next) => {
     try {
       const { institutionId } = institutionIdSchema.parse(req.params);
       const inst = await ctx.pool.query<{ ok: number }>("select 1 as ok from institutions where id=$1 and tenant_id=$2 limit 1", [
@@ -218,13 +287,22 @@ export function createAdminInstitutionsRouter(ctx: MainApiContext): Router {
         `,
         [institutionId]
       );
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "admin_institution_members_listed",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "institution",
+        subjectId: institutionId,
+        data: { count: result.rows.length }
+      });
       res.json(result.rows);
     } catch (err) {
       next(err);
     }
   });
 
-  router.post("/:institutionId/members", async (req, res, next) => {
+  router.post("/:institutionId/members", requirePermission(ctx, { action: PERMISSIONS.ADMIN_INSTITUTIONS_MEMBERS_UPSERT }), async (req, res, next) => {
     try {
       const { institutionId } = institutionIdSchema.parse(req.params);
       const body = addMemberSchema.parse(req.body ?? {});
@@ -250,13 +328,22 @@ export function createAdminInstitutionsRouter(ctx: MainApiContext): Router {
         `,
         [id, institutionId, body.user_id, body.role, status, new Date()]
       );
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "admin_institution_member_upserted",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "institution",
+        subjectId: institutionId,
+        data: { member_id: result.rows[0]!.id, user_id: body.user_id, role: body.role, status }
+      });
       res.status(201).json({ id: result.rows[0]!.id });
     } catch (err) {
       next(err);
     }
   });
 
-  router.post("/:institutionId/members/:memberId", async (req, res, next) => {
+  router.post("/:institutionId/members/:memberId", requirePermission(ctx, { action: PERMISSIONS.ADMIN_INSTITUTIONS_MEMBERS_UPDATE }), async (req, res, next) => {
     try {
       const { institutionId, memberId } = memberIdParamsSchema.parse(req.params);
       const body = updateMemberSchema.parse(req.body ?? {});
@@ -273,6 +360,15 @@ export function createAdminInstitutionsRouter(ctx: MainApiContext): Router {
         [body.role ?? null, body.status ?? null, memberId, institutionId]
       );
       if (!updated.rowCount) throw notFound("member_not_found", "Member not found");
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "admin_institution_member_updated",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "institution_member",
+        subjectId: memberId,
+        data: { institution_id: institutionId, ...(body.role ? { role: body.role } : {}), ...(body.status ? { status: body.status } : {}) }
+      });
       res.json({ status: "ok" });
     } catch (err) {
       next(err);

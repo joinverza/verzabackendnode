@@ -1,1 +1,1 @@
-{"version":3,"file":"adminBridge.d.ts","sourceRoot":"","sources":["../../../src/v1/routers/adminBridge.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,MAAM,EAAE,MAAM,SAAS,CAAC;AAOtC,OAAO,KAAK,EAAE,cAAc,EAAE,MAAM,cAAc,CAAC;AAuBnD,wBAAgB,uBAAuB,CAAC,GAAG,EAAE,cAAc,GAAG,MAAM,CAkHnE"}
+{"version":3,"file":"adminBridge.d.ts","sourceRoot":"","sources":["../../../src/v1/routers/adminBridge.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,MAAM,EAAE,MAAM,SAAS,CAAC;AAQtC,OAAO,KAAK,EAAE,cAAc,EAAE,MAAM,cAAc,CAAC;AAwBnD,wBAAgB,uBAAuB,CAAC,GAAG,EAAE,cAAc,GAAG,MAAM,CAqLnE"}

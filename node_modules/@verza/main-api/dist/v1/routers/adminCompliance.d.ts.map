@@ -1,1 +1,1 @@
-{"version":3,"file":"adminCompliance.d.ts","sourceRoot":"","sources":["../../../src/v1/routers/adminCompliance.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,MAAM,EAAE,MAAM,SAAS,CAAC;AAUtC,OAAO,KAAK,EAAE,cAAc,EAAE,MAAM,cAAc,CAAC;AAiCnD,wBAAgB,2BAA2B,CAAC,GAAG,EAAE,cAAc,GAAG,MAAM,CA8QvE"}
+{"version":3,"file":"adminCompliance.d.ts","sourceRoot":"","sources":["../../../src/v1/routers/adminCompliance.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,MAAM,EAAE,MAAM,SAAS,CAAC;AAWtC,OAAO,KAAK,EAAE,cAAc,EAAE,MAAM,cAAc,CAAC;AAiCnD,wBAAgB,2BAA2B,CAAC,GAAG,EAAE,cAAc,GAAG,MAAM,CA+ZvE"}

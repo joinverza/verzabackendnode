@@ -3,9 +3,11 @@ import type { Router } from "express";
 import express from "express";
 import { z } from "zod";
 
+import { PERMISSIONS, requirePermission } from "@verza/auth";
 import { badRequest, notFound } from "@verza/http";
 
 import type { MainApiContext } from "../routes.js";
+import { appendAuditEvent } from "./auditLog.js";
 
 const listSchema = z.object({
   limit: z.string().regex(/^\d+$/).optional(),
@@ -31,7 +33,7 @@ const upsertCredentialMetadataSchema = z.object({
 export function createAdminBridgeRouter(ctx: MainApiContext): Router {
   const router = express.Router();
 
-  router.get("/transactions", async (req, res, next) => {
+  router.get("/transactions", requirePermission(ctx, { action: PERMISSIONS.ADMIN_BRIDGE_TRANSACTIONS_LIST }), async (req, res, next) => {
     try {
       const q = listSchema.parse(req.query ?? {});
       const limit = Math.min(Number(q.limit ?? "50"), 200);
@@ -43,13 +45,22 @@ export function createAdminBridgeRouter(ctx: MainApiContext): Router {
         "select id, midnight_tx_hash, cardano_tx_hash, operation_type, status, retry_count, created_at, updated_at from cross_chain_transactions order by created_at desc limit $1 offset $2",
         [limit, offset]
       );
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "admin_bridge_transactions_listed",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "cross_chain_transactions",
+        subjectId: "list",
+        data: { limit, offset, count: result.rows.length }
+      });
       res.json(result.rows);
     } catch (err) {
       next(err);
     }
   });
 
-  router.get("/transactions/:id", async (req, res, next) => {
+  router.get("/transactions/:id", requirePermission(ctx, { action: PERMISSIONS.ADMIN_BRIDGE_TRANSACTION_READ }), async (req, res, next) => {
     try {
       const { id } = txIdSchema.parse(req.params);
       const result = await ctx.pool.query(
@@ -58,13 +69,22 @@ export function createAdminBridgeRouter(ctx: MainApiContext): Router {
       );
       const row = result.rows[0];
       if (!row) throw notFound("transaction_not_found", "Transaction not found");
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "admin_bridge_transaction_viewed",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "cross_chain_transaction",
+        subjectId: id,
+        data: {}
+      });
       res.json(row);
     } catch (err) {
       next(err);
     }
   });
 
-  router.post("/transactions/:id/status", async (req, res, next) => {
+  router.post("/transactions/:id/status", requirePermission(ctx, { action: PERMISSIONS.ADMIN_BRIDGE_TRANSACTION_STATUS_SET }), async (req, res, next) => {
     try {
       const { id } = txIdSchema.parse(req.params);
       const body = setTxStatusSchema.parse(req.body ?? {});
@@ -75,13 +95,22 @@ export function createAdminBridgeRouter(ctx: MainApiContext): Router {
         id
       ]);
       if (!updated.rowCount) throw notFound("transaction_not_found", "Transaction not found");
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "admin_bridge_transaction_status_set",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "cross_chain_transaction",
+        subjectId: id,
+        data: { status: body.status }
+      });
       res.json({ status: "ok" });
     } catch (err) {
       next(err);
     }
   });
 
-  router.post("/transactions/:id/retry", async (req, res, next) => {
+  router.post("/transactions/:id/retry", requirePermission(ctx, { action: PERMISSIONS.ADMIN_BRIDGE_TRANSACTION_RETRY }), async (req, res, next) => {
     try {
       const { id } = txIdSchema.parse(req.params);
       const ts = new Date();
@@ -90,13 +119,25 @@ export function createAdminBridgeRouter(ctx: MainApiContext): Router {
         [ts, id]
       );
       if (!updated.rowCount) throw notFound("transaction_not_found", "Transaction not found");
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "admin_bridge_transaction_retry_requested",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "cross_chain_transaction",
+        subjectId: id,
+        data: {}
+      });
       res.json({ status: "ok" });
     } catch (err) {
       next(err);
     }
   });
 
-  router.get("/credential-metadata/:credential_id", async (req, res, next) => {
+  router.get(
+    "/credential-metadata/:credential_id",
+    requirePermission(ctx, { action: PERMISSIONS.ADMIN_BRIDGE_CREDENTIAL_METADATA_READ }),
+    async (req, res, next) => {
     try {
       const { credential_id } = credentialIdSchema.parse(req.params);
       const result = await ctx.pool.query(
@@ -105,13 +146,26 @@ export function createAdminBridgeRouter(ctx: MainApiContext): Router {
       );
       const row = result.rows[0];
       if (!row) throw notFound("credential_metadata_not_found", "Credential metadata not found");
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "admin_bridge_credential_metadata_viewed",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "credential_metadata",
+        subjectId: credential_id,
+        data: {}
+      });
       res.json(row);
     } catch (err) {
       next(err);
     }
-  });
+  }
+  );
 
-  router.post("/credential-metadata/upsert", async (req, res, next) => {
+  router.post(
+    "/credential-metadata/upsert",
+    requirePermission(ctx, { action: PERMISSIONS.ADMIN_BRIDGE_CREDENTIAL_METADATA_UPSERT }),
+    async (req, res, next) => {
     try {
       const body = upsertCredentialMetadataSchema.parse(req.body ?? {});
       const now = new Date();
@@ -135,12 +189,26 @@ export function createAdminBridgeRouter(ctx: MainApiContext): Router {
           now
         ]
       );
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "admin_bridge_credential_metadata_upserted",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "credential_metadata",
+        subjectId: body.credential_id,
+        data: {
+          ...(body.midnight_address ? { midnight_address: body.midnight_address } : {}),
+          ...(body.cardano_escrow_id ? { cardano_escrow_id: body.cardano_escrow_id } : {}),
+          ...(body.verifier_did ? { verifier_did: body.verifier_did } : {}),
+          ...(body.status ? { status: body.status } : {})
+        }
+      });
       res.json({ status: "ok" });
     } catch (err) {
       next(err);
     }
-  });
+  }
+  );
 
   return router;
 }
-

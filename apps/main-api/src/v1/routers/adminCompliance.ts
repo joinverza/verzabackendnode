@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import express from "express";
 import { z } from "zod";
 
+import { PERMISSIONS, requirePermission } from "@verza/auth";
 import { badRequest, notFound } from "@verza/http";
 import { sha256Hex } from "@verza/crypto";
 
@@ -44,7 +45,13 @@ const retentionSetSchema = z.object({
 export function createAdminComplianceRouter(ctx: MainApiContext): Router {
   const router = express.Router();
 
-  router.get("/audit/head", async (req, res, next) => {
+  router.get(
+    "/audit/head",
+    requirePermission(ctx, {
+      action: PERMISSIONS.ADMIN_COMPLIANCE_AUDIT_HEAD_READ,
+      tenantId: (req) => (typeof req.query.tenant_id === "string" ? req.query.tenant_id : null)
+    }),
+    async (req, res, next) => {
     try {
       const { tenant_id } = tenantSchema.parse(req.query);
       const stream = typeof req.query.stream === "string" && req.query.stream.trim().length ? req.query.stream.trim() : "tenant";
@@ -54,13 +61,29 @@ export function createAdminComplianceRouter(ctx: MainApiContext): Router {
       );
       const row = result.rows[0];
       if (!row) throw notFound("audit_chain_not_found", "Audit chain not found");
+      await appendAuditEvent(ctx.pool, {
+        tenantId: tenant_id,
+        eventType: "admin_audit_head_viewed",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "audit_chain",
+        subjectId: stream,
+        data: {}
+      });
       res.json({ tenant_id: row.tenant_id, stream: row.stream, next_seq: Number(row.next_seq), head_hash: row.head_hash, updated_at: row.updated_at });
     } catch (err) {
       next(err);
     }
-  });
+  }
+  );
 
-  router.get("/audit/events", async (req, res, next) => {
+  router.get(
+    "/audit/events",
+    requirePermission(ctx, {
+      action: PERMISSIONS.ADMIN_COMPLIANCE_AUDIT_EVENTS_LIST,
+      tenantId: (req) => (typeof req.query.tenant_id === "string" ? req.query.tenant_id : null)
+    }),
+    async (req, res, next) => {
     try {
       const q = exportQuerySchema.parse(req.query);
       const stream = (q.stream ?? "tenant").trim() || "tenant";
@@ -70,13 +93,29 @@ export function createAdminComplianceRouter(ctx: MainApiContext): Router {
         "select id,tenant_id,stream,seq,prev_hash,event_hash,event_type,actor_type,actor_id,subject_type,subject_id,data_json,created_at,created_at_ms from audit_events where tenant_id=$1 and stream=$2 and seq >= $3 order by seq asc limit $4",
         [q.tenant_id, stream, fromSeq, limit]
       );
+      await appendAuditEvent(ctx.pool, {
+        tenantId: q.tenant_id,
+        eventType: "admin_audit_events_listed",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "audit_events",
+        subjectId: stream,
+        data: { from_seq: fromSeq, limit }
+      });
       res.json(result.rows.map((r) => ({ ...r, data: safeJson(String(r.data_json ?? "{}")) })));
     } catch (err) {
       next(err);
     }
-  });
+  }
+  );
 
-  router.get("/audit/export", async (req, res, next) => {
+  router.get(
+    "/audit/export",
+    requirePermission(ctx, {
+      action: PERMISSIONS.ADMIN_COMPLIANCE_AUDIT_EXPORT,
+      tenantId: (req) => (typeof req.query.tenant_id === "string" ? req.query.tenant_id : null)
+    }),
+    async (req, res, next) => {
     try {
       const q = exportQuerySchema.parse(req.query);
       const stream = (q.stream ?? "tenant").trim() || "tenant";
@@ -110,6 +149,16 @@ export function createAdminComplianceRouter(ctx: MainApiContext): Router {
 
       const exportHash = sha256Hex(items.map((i) => i.event_hash).join("\n"));
 
+      await appendAuditEvent(ctx.pool, {
+        tenantId: q.tenant_id,
+        eventType: "admin_audit_exported",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "audit_export",
+        subjectId: stream,
+        data: { from_seq: fromSeq, to_seq: upper ?? null, count: items.length, export_sha256: exportHash, format }
+      });
+
       if (format === "ndjson") {
         res.setHeader("content-type", "application/x-ndjson");
         res.write(JSON.stringify({ type: "manifest", tenant_id: q.tenant_id, stream, from_seq: fromSeq, to_seq: upper ?? null, count: items.length, export_sha256: exportHash }) + "\n");
@@ -122,9 +171,16 @@ export function createAdminComplianceRouter(ctx: MainApiContext): Router {
     } catch (err) {
       next(err);
     }
-  });
+  }
+  );
 
-  router.post("/audit/verify", async (req, res, next) => {
+  router.post(
+    "/audit/verify",
+    requirePermission(ctx, {
+      action: PERMISSIONS.ADMIN_COMPLIANCE_AUDIT_VERIFY,
+      tenantId: (req) => (typeof (req as any)?.body?.tenant_id === "string" ? (req as any).body.tenant_id : null)
+    }),
+    async (req, res, next) => {
     try {
       const body = z
         .object({
@@ -140,13 +196,29 @@ export function createAdminComplianceRouter(ctx: MainApiContext): Router {
         ...(typeof body.from_seq === "number" ? { fromSeq: body.from_seq } : {}),
         ...(typeof body.to_seq === "number" ? { toSeq: body.to_seq } : {})
       });
+      await appendAuditEvent(ctx.pool, {
+        tenantId: body.tenant_id,
+        eventType: "admin_audit_chain_verified",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "audit_chain",
+        subjectId: (body.stream ?? "tenant").trim() || "tenant",
+        data: { from_seq: body.from_seq ?? null, to_seq: body.to_seq ?? null, ok: (result as any)?.ok ?? null }
+      });
       res.json(result);
     } catch (err) {
       next(err);
     }
-  });
+  }
+  );
 
-  router.get("/reports/summary", async (req, res, next) => {
+  router.get(
+    "/reports/summary",
+    requirePermission(ctx, {
+      action: PERMISSIONS.ADMIN_COMPLIANCE_REPORTS_SUMMARY_READ,
+      tenantId: (req) => (typeof req.query.tenant_id === "string" ? req.query.tenant_id : null)
+    }),
+    async (req, res, next) => {
     try {
       const { tenant_id } = tenantSchema.parse(req.query);
       const from = typeof req.query.from === "string" ? new Date(req.query.from) : null;
@@ -164,6 +236,15 @@ export function createAdminComplianceRouter(ctx: MainApiContext): Router {
         `select request_type, status, count(*)::text as count from dsar_requests where ${where.replace("created_at", "requested_at")} group by request_type, status order by count(*) desc`,
         params
       );
+      await appendAuditEvent(ctx.pool, {
+        tenantId: tenant_id,
+        eventType: "admin_reports_summary_viewed",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "reports",
+        subjectId: "summary",
+        data: { from: fromOk ? from?.toISOString() : null, to: toOk ? to?.toISOString() : null }
+      });
       res.json({
         tenant_id,
         from: fromOk ? from?.toISOString() : null,
@@ -174,9 +255,16 @@ export function createAdminComplianceRouter(ctx: MainApiContext): Router {
     } catch (err) {
       next(err);
     }
-  });
+  }
+  );
 
-  router.post("/evidence", async (req, res, next) => {
+  router.post(
+    "/evidence",
+    requirePermission(ctx, {
+      action: PERMISSIONS.ADMIN_COMPLIANCE_EVIDENCE_CREATE,
+      tenantId: (req) => (typeof (req as any)?.body?.tenant_id === "string" ? (req as any).body.tenant_id : null)
+    }),
+    async (req, res, next) => {
     try {
       const body = evidenceCreateSchema.parse(req.body ?? {});
       const id = crypto.randomUUID();
@@ -223,9 +311,16 @@ export function createAdminComplianceRouter(ctx: MainApiContext): Router {
     } catch (err) {
       next(err);
     }
-  });
+  }
+  );
 
-  router.get("/evidence/:id", async (req, res, next) => {
+  router.get(
+    "/evidence/:id",
+    requirePermission(ctx, {
+      action: PERMISSIONS.ADMIN_COMPLIANCE_EVIDENCE_READ,
+      tenantId: (req) => (typeof req.query.tenant_id === "string" ? req.query.tenant_id : null)
+    }),
+    async (req, res, next) => {
     try {
       const id = String(req.params.id ?? "");
       if (!id || !id.match(/^[0-9a-f-]{36}$/i)) throw badRequest("invalid_id", "Invalid id");
@@ -238,13 +333,29 @@ export function createAdminComplianceRouter(ctx: MainApiContext): Router {
       const row = result.rows[0];
       if (!row) throw notFound("evidence_not_found", "Evidence not found");
       if (!includeBlob) delete row.blob_b64;
+      await appendAuditEvent(ctx.pool, {
+        tenantId: tenant_id,
+        eventType: "admin_evidence_viewed",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "evidence_object",
+        subjectId: id,
+        data: { include_blob: includeBlob }
+      });
       res.json(row);
     } catch (err) {
       next(err);
     }
-  });
+  }
+  );
 
-  router.get("/privacy/requests", async (req, res, next) => {
+  router.get(
+    "/privacy/requests",
+    requirePermission(ctx, {
+      action: PERMISSIONS.ADMIN_COMPLIANCE_PRIVACY_REQUESTS_LIST,
+      tenantId: (req) => (typeof req.query.tenant_id === "string" ? req.query.tenant_id : null)
+    }),
+    async (req, res, next) => {
     try {
       const { tenant_id } = tenantSchema.parse(req.query);
       const status = typeof req.query.status === "string" && req.query.status.trim().length ? req.query.status.trim() : null;
@@ -254,13 +365,29 @@ export function createAdminComplianceRouter(ctx: MainApiContext): Router {
           : "select id,tenant_id,user_id,request_type,status,reason,requested_at,processed_at,processed_by,result_json from dsar_requests where tenant_id=$1 order by requested_at desc limit 500",
         status ? [tenant_id, status] : [tenant_id]
       );
+      await appendAuditEvent(ctx.pool, {
+        tenantId: tenant_id,
+        eventType: "admin_privacy_requests_listed",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "dsar_requests",
+        subjectId: status ?? "all",
+        data: {}
+      });
       res.json(result.rows.map((r) => ({ ...r, result: safeJson(String(r.result_json ?? "{}")) })));
     } catch (err) {
       next(err);
     }
-  });
+  }
+  );
 
-  router.post("/privacy/retention", async (req, res, next) => {
+  router.post(
+    "/privacy/retention",
+    requirePermission(ctx, {
+      action: PERMISSIONS.ADMIN_COMPLIANCE_RETENTION_POLICY_SET,
+      tenantId: (req) => (typeof (req as any)?.body?.tenant_id === "string" ? (req as any).body.tenant_id : null)
+    }),
+    async (req, res, next) => {
     try {
       const body = retentionSetSchema.parse(req.body ?? {});
       await ctx.pool.query(
@@ -280,17 +407,26 @@ export function createAdminComplianceRouter(ctx: MainApiContext): Router {
     } catch (err) {
       next(err);
     }
-  });
+  }
+  );
 
-  router.post("/privacy/retention/run", async (req, res, next) => {
+  router.post(
+    "/privacy/retention/run",
+    requirePermission(ctx, {
+      action: PERMISSIONS.ADMIN_COMPLIANCE_RETENTION_RUN,
+      tenantId: (req) => {
+        const fromBody = typeof (req as any)?.body?.tenant_id === "string" ? (req as any).body.tenant_id : null;
+        const fromQuery = typeof req.query.tenant_id === "string" ? req.query.tenant_id : null;
+        return fromBody ?? fromQuery ?? null;
+      }
+    }),
+    async (req, res, next) => {
     try {
       const tenantId = typeof req.body?.tenant_id === "string" ? req.body.tenant_id : typeof req.query.tenant_id === "string" ? req.query.tenant_id : null;
-      const tenantFilter = tenantId ? z.string().uuid().parse(tenantId) : null;
+      const tenantFilter = z.string().uuid().parse(tenantId);
       const policies = await ctx.pool.query<{ tenant_id: string; resource_type: string; retention_days: number; action: string }>(
-        tenantFilter
-          ? "select tenant_id,resource_type,retention_days,action from retention_policies where tenant_id=$1"
-          : "select tenant_id,resource_type,retention_days,action from retention_policies",
-        tenantFilter ? [tenantFilter] : []
+        "select tenant_id,resource_type,retention_days,action from retention_policies where tenant_id=$1",
+        [tenantFilter]
       );
       const results: any[] = [];
       for (const p of policies.rows) {
@@ -304,11 +440,21 @@ export function createAdminComplianceRouter(ctx: MainApiContext): Router {
           results.push({ tenant_id: p.tenant_id, resource_type: p.resource_type, action: p.action, cutoff: cutoff.toISOString(), deleted: del.rowCount });
         }
       }
+      await appendAuditEvent(ctx.pool, {
+        tenantId: tenantFilter,
+        eventType: "admin_retention_run",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "retention",
+        subjectId: "run",
+        data: { results: results.map((r) => ({ ...r, deleted: Number(r.deleted ?? 0) })) }
+      });
       res.json({ status: "ok", results });
     } catch (err) {
       next(err);
     }
-  });
+  }
+  );
 
   return router;
 }

@@ -6,67 +6,67 @@ TAP version 13
 # Subtest: verifyAccessToken accepts a valid token
 ok 1 - verifyAccessToken accepts a valid token
   ---
-  duration_ms: 5.3177
+  duration_ms: 56.0988
   type: 'test'
   ...
 # Subtest: verifyAccessToken rejects issuer mismatch
 ok 2 - verifyAccessToken rejects issuer mismatch
   ---
-  duration_ms: 0.9776
+  duration_ms: 1.0021
   type: 'test'
   ...
 # Subtest: verifyAccessToken rejects exp at current time
 ok 3 - verifyAccessToken rejects exp at current time
   ---
-  duration_ms: 0.9195
+  duration_ms: 1.0258
   type: 'test'
   ...
 # Subtest: verifyAccessToken rejects missing required claims
 ok 4 - verifyAccessToken rejects missing required claims
   ---
-  duration_ms: 0.7457
+  duration_ms: 0.8125
   type: 'test'
   ...
 # Subtest: verifyAccessToken rejects wrong header values even if signature matches
 ok 5 - verifyAccessToken rejects wrong header values even if signature matches
   ---
-  duration_ms: 0.9391
+  duration_ms: 1.0392
   type: 'test'
   ...
 # Subtest: verifyAccessToken rejects signature mismatch
 ok 6 - verifyAccessToken rejects signature mismatch
   ---
-  duration_ms: 0.7224
+  duration_ms: 0.8301
   type: 'test'
   ...
 # Subtest: verifyAccessToken rejects malformed tokens
 ok 7 - verifyAccessToken rejects malformed tokens
   ---
-  duration_ms: 0.5285
+  duration_ms: 0.5435
   type: 'test'
   ...
 # Subtest: requireInstitutionApiKey: missing key returns 401
 ok 8 - requireInstitutionApiKey: missing key returns 401
   ---
-  duration_ms: 391.8164
+  duration_ms: 256.747
   type: 'test'
   ...
 # Subtest: requireInstitutionApiKey: valid key sets req.institution
 ok 9 - requireInstitutionApiKey: valid key sets req.institution
   ---
-  duration_ms: 44.6117
+  duration_ms: 65.6731
   type: 'test'
   ...
 # Subtest: verifyTwoFactorOrThrow returns used backup code hash when valid
 ok 10 - verifyTwoFactorOrThrow returns used backup code hash when valid
   ---
-  duration_ms: 7.167
+  duration_ms: 12.0713
   type: 'test'
   ...
 # Subtest: verifyTwoFactorOrThrow throws invalid_twofa on bad codes
 ok 11 - verifyTwoFactorOrThrow throws invalid_twofa on bad codes
   ---
-  duration_ms: 1.7571
+  duration_ms: 1.774
   type: 'test'
   ...
 1..11
@@ -77,4 +77,4 @@ ok 11 - verifyTwoFactorOrThrow throws invalid_twofa on bad codes
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 2612.0026
+# duration_ms 3760.9061
