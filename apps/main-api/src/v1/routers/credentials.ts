@@ -10,6 +10,7 @@ import { badRequest, notFound } from "@verza/http";
 
 import type { MainApiContext } from "../routes.js";
 import { getOrCreateProofForCredential } from "./proofs.js";
+import { appendAuditEvent } from "./auditLog.js";
 
 export const storeSchema = z.object({
   type: z.string().min(1),
@@ -83,6 +84,19 @@ export function createCredentialsRouter(ctx: MainApiContext): Router {
           ts
         ]
       );
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "credential_stored",
+        actorType: "user",
+        actorId: req.auth.userId,
+        subjectType: "credential",
+        subjectId: id,
+        data: {
+          type: body.type,
+          issuer_name: body.issuer_name ?? "",
+          document_number: body.document_number ? "present" : ""
+        }
+      });
       res.json({ id });
     } catch (err) {
       next(err);
@@ -130,6 +144,15 @@ export function createCredentialsRouter(ctx: MainApiContext): Router {
         "update credentials set status=coalesce($1,status), notes=coalesce($2,notes), updated_at=$3 where id=$4 and tenant_id=$5 and owner_user_id=$6",
         [body.status ?? null, body.notes ?? null, new Date(), credentialId, req.auth.tenantId, req.auth.userId]
       );
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "credential_updated",
+        actorType: "user",
+        actorId: req.auth.userId,
+        subjectType: "credential",
+        subjectId: credentialId,
+        data: { status: body.status ?? null, notes: body.notes ? "present" : null }
+      });
       res.json({ status: "ok" });
     } catch (err) {
       next(err);
@@ -172,6 +195,15 @@ export function createCredentialsRouter(ctx: MainApiContext): Router {
         "update credential_shares set revoked_at=$1 where tenant_id=$2 and id=$3 and credential_id=$4 and owner_user_id=$5",
         [new Date(), req.auth.tenantId, shareId, credentialId, req.auth.userId]
       );
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "credential_share_revoked",
+        actorType: "user",
+        actorId: req.auth.userId,
+        subjectType: "credential_share",
+        subjectId: shareId,
+        data: { credential_id: credentialId }
+      });
       res.json({ status: "ok" });
     } catch (err) {
       next(err);
@@ -206,6 +238,15 @@ export function createCredentialsRouter(ctx: MainApiContext): Router {
           createdAt
         ]
       );
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "credential_shared",
+        actorType: "user",
+        actorId: req.auth.userId,
+        subjectType: "credential",
+        subjectId: body.credential_id,
+        data: { share_id: id, recipient: body.recipient ?? "", recipient_did: body.recipient_did ?? "", permission: body.permission ?? "view" }
+      });
       res.json({ id, token });
     } catch (err) {
       next(err);

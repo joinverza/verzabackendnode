@@ -24,6 +24,8 @@ import { createAdminBridgeRouter } from "./routers/adminBridge.js";
 import { createAdminInstitutionsRouter } from "./routers/adminInstitutions.js";
 import { createVerifiersRouter } from "./routers/verifiers.js";
 import { createVerificationsRouter } from "./routers/verifications.js";
+import { createAdminComplianceRouter } from "./routers/adminCompliance.js";
+import { createPrivacyRouter } from "./routers/privacy.js";
 
 export type MainApiContext = {
   config: MainApiConfig;
@@ -50,12 +52,14 @@ export function registerMainApiRoutes(app: Express, ctx: MainApiContext) {
   api.use("/fiat/payments", createFiatPaymentsRouter(ctx));
   api.use("/search", requireUser(ctx), createSearchRouter(ctx));
   api.use("/shares", createPublicSharesRouter(ctx));
+  api.use("/privacy", requireUser(ctx), createPrivacyRouter(ctx));
 
   app.use("/api/v1", api);
 
   const admin = express.Router();
   admin.use("/bridge", requireAdmin(ctx), createAdminBridgeRouter(ctx));
   admin.use("/institutions", requireAdmin(ctx), createAdminInstitutionsRouter(ctx));
+  admin.use("/compliance", requireAdmin(ctx), createAdminComplianceRouter(ctx));
   app.use("/admin", admin);
 
   const institution = express.Router();

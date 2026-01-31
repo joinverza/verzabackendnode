@@ -13,9 +13,38 @@ void test("credentials: store encrypts and get decrypts roundtrip", async () => 
         next();
     });
     const credentialsById = new Map();
+    const auditChains = new Map();
     const pool = {
         query: async (sql, params = []) => {
             const q = sql.replace(/\s+/g, " ").trim().toLowerCase();
+            if (q === "begin" || q === "commit" || q === "rollback") {
+                return { rowCount: 0, rows: [] };
+            }
+            if (q.startsWith("select next_seq, head_hash from audit_chains where tenant_id=$1 and stream=$2")) {
+                const [tenantId, stream] = params;
+                const key = `${tenantId}:${stream}`;
+                const row = auditChains.get(key);
+                if (!row)
+                    return { rowCount: 0, rows: [] };
+                return { rowCount: 1, rows: [{ next_seq: row.next_seq, head_hash: row.head_hash }] };
+            }
+            if (q.startsWith("insert into audit_chains (tenant_id, stream, next_seq, head_hash, updated_at) values")) {
+                const [tenantId, stream] = params;
+                const key = `${tenantId}:${stream}`;
+                if (!auditChains.has(key))
+                    auditChains.set(key, { next_seq: 1, head_hash: "" });
+                return { rowCount: 1, rows: [] };
+            }
+            if (q.startsWith("update audit_chains set next_seq=next_seq+1, head_hash=$1, updated_at=$2 where tenant_id=$3 and stream=$4")) {
+                const [headHash, _updatedAt, tenantId, stream] = params;
+                const key = `${tenantId}:${stream}`;
+                const row = auditChains.get(key) ?? { next_seq: 1, head_hash: "" };
+                auditChains.set(key, { next_seq: row.next_seq + 1, head_hash: headHash });
+                return { rowCount: 1, rows: [] };
+            }
+            if (q.startsWith("insert into audit_events (id,tenant_id,stream,seq,prev_hash,event_hash,event_type")) {
+                return { rowCount: 1, rows: [] };
+            }
             if (q.startsWith("insert into credentials")) {
                 const [id, tenant_id, owner_user_id, owner_did, type, status, issuer_name, document_number, issue_date, expiry_date, issuing_authority, notes, encrypted_data] = params;
                 credentialsById.set(id, {

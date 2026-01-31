@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import express from "express";
 import { z } from "zod";
 import { badRequest, createRateLimiter, forbidden, notFound } from "@verza/http";
+import { appendAuditEvent } from "./auditLog.js";
 const requestSchema = z.object({
     credential_id: z.string().uuid().optional(),
     provider: z.string().default("internal"),
@@ -81,6 +82,15 @@ export function createIdentityVerificationsRouter(ctx) {
                 JSON.stringify({ provider: shouldUseOrchestrator ? "orchestrator" : body.provider, verifier_reference: providerReference }),
                 now
             ]);
+            await appendAuditEvent(ctx.pool, {
+                tenantId: req.auth.tenantId,
+                eventType: "identity_verification_requested",
+                actorType: "user",
+                actorId: req.auth.userId,
+                subjectType: "identity_verification",
+                subjectId: id,
+                data: { provider: shouldUseOrchestrator ? "orchestrator" : body.provider, document_type: body.document_type ?? "", verifier_reference: providerReference || undefined }
+            });
             res.status(201).json({ id, status: "pending", verifier_reference: providerReference || undefined });
         }
         catch (err) {
@@ -281,6 +291,15 @@ export function createIdentityVerificationsRouter(ctx) {
                 JSON.stringify({ status: body.status, actor_user_id: req.auth.userId }),
                 now
             ]);
+            await appendAuditEvent(ctx.pool, {
+                tenantId: req.auth.tenantId,
+                eventType: "identity_verification_completed",
+                actorType: "admin",
+                actorId: req.auth.userId,
+                subjectType: "identity_verification",
+                subjectId: id,
+                data: { status: body.status, user_id: row.user_id, verifier_institution_id: body.verifier_institution_id ?? null, standard: body.standard ?? null }
+            });
             res.json({ status: "ok" });
         }
         catch (err) {
@@ -336,6 +355,15 @@ export function createIdentityVerificationsRouter(ctx) {
             if (!updated.rowCount)
                 throw notFound("identity_verification_not_found", "Identity verification not found");
             await ctx.pool.query("insert into identity_verification_audit_events (id,tenant_id,verification_id,user_id,event_type,data_json,created_at) values ($1,$2,$3,$4,$5,$6,$7)", [crypto.randomUUID(), req.auth.tenantId, id, req.auth.userId, "cancelled", "{}", now]);
+            await appendAuditEvent(ctx.pool, {
+                tenantId: req.auth.tenantId,
+                eventType: "identity_verification_cancelled",
+                actorType: "user",
+                actorId: req.auth.userId,
+                subjectType: "identity_verification",
+                subjectId: id,
+                data: {}
+            });
             res.json({ status: "ok" });
         }
         catch (err) {

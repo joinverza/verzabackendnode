@@ -6,49 +6,49 @@ TAP version 13
 # Subtest: auth flow: signup -> login -> refresh -> logout
 ok 1 - auth flow: signup -> login -> refresh -> logout
   ---
-  duration_ms: 1057.5135
+  duration_ms: 1529.0575
   type: 'test'
   ...
 # Subtest: POST /forgot-password is always ok (no user)
 ok 2 - POST /forgot-password is always ok (no user)
   ---
-  duration_ms: 280.8425
+  duration_ms: 347.3988
   type: 'test'
   ...
 # Subtest: credentials: store encrypts and get decrypts roundtrip
 ok 3 - credentials: store encrypts and get decrypts roundtrip
   ---
-  duration_ms: 1079.0777
+  duration_ms: 491.0129
   type: 'test'
   ...
 # Subtest: fiat/stripe: webhook handles paid/refunded/disputed and idempotency
 ok 4 - fiat/stripe: webhook handles paid/refunded/disputed and idempotency
   ---
-  duration_ms: 546.6525
+  duration_ms: 546.0264
   type: 'test'
   ...
 # Subtest: fiat/stripe: reconcile updates pending sessions and writes ledger
 ok 5 - fiat/stripe: reconcile updates pending sessions and writes ledger
   ---
-  duration_ms: 40.9061
+  duration_ms: 85.2833
   type: 'test'
   ...
 # Subtest: admin/bridge: auth required and workflows behave
 ok 6 - admin/bridge: auth required and workflows behave
   ---
-  duration_ms: 102.1153
+  duration_ms: 129.5597
   type: 'test'
   ...
 # Subtest: admin/institutions: api keys and members workflows behave
 ok 7 - admin/institutions: api keys and members workflows behave
   ---
-  duration_ms: 154.0578
+  duration_ms: 120.5702
   type: 'test'
   ...
 # Subtest: identity verifications orchestrator flow via gateway
 ok 8 - identity verifications orchestrator flow via gateway
   ---
-  duration_ms: 777.3867
+  duration_ms: 755.8293
   type: 'test'
   ...
 1..8
@@ -59,4 +59,4 @@ ok 8 - identity verifications orchestrator flow via gateway
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 7110.8606
+# duration_ms 7358.1814

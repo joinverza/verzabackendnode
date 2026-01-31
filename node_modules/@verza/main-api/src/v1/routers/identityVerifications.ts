@@ -8,6 +8,7 @@ import { z } from "zod";
 import { badRequest, createRateLimiter, forbidden, notFound } from "@verza/http";
 
 import type { MainApiContext } from "../routes.js";
+import { appendAuditEvent } from "./auditLog.js";
 
 const requestSchema = z.object({
   credential_id: z.string().uuid().optional(),
@@ -101,6 +102,15 @@ export function createIdentityVerificationsRouter(ctx: MainApiContext): Router {
           now
         ]
       );
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "identity_verification_requested",
+        actorType: "user",
+        actorId: req.auth.userId,
+        subjectType: "identity_verification",
+        subjectId: id,
+        data: { provider: shouldUseOrchestrator ? "orchestrator" : body.provider, document_type: body.document_type ?? "", verifier_reference: providerReference || undefined }
+      });
 
       res.status(201).json({ id, status: "pending", verifier_reference: providerReference || undefined });
     } catch (err) {
@@ -336,6 +346,15 @@ export function createIdentityVerificationsRouter(ctx: MainApiContext): Router {
           now
         ]
       );
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "identity_verification_completed",
+        actorType: "admin",
+        actorId: req.auth.userId,
+        subjectType: "identity_verification",
+        subjectId: id,
+        data: { status: body.status, user_id: row.user_id, verifier_institution_id: body.verifier_institution_id ?? null, standard: body.standard ?? null }
+      });
       res.json({ status: "ok" });
     } catch (err) {
       next(err);
@@ -400,6 +419,15 @@ export function createIdentityVerificationsRouter(ctx: MainApiContext): Router {
         "insert into identity_verification_audit_events (id,tenant_id,verification_id,user_id,event_type,data_json,created_at) values ($1,$2,$3,$4,$5,$6,$7)",
         [crypto.randomUUID(), req.auth.tenantId, id, req.auth.userId, "cancelled", "{}", now]
       );
+      await appendAuditEvent(ctx.pool, {
+        tenantId: req.auth.tenantId,
+        eventType: "identity_verification_cancelled",
+        actorType: "user",
+        actorId: req.auth.userId,
+        subjectType: "identity_verification",
+        subjectId: id,
+        data: {}
+      });
       res.json({ status: "ok" });
     } catch (err) {
       next(err);
