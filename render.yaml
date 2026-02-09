@@ -1,0 +1,138 @@
+services:
+  - type: web
+    name: verza-main-api
+    env: docker
+    plan: standard
+    autoDeploy: true
+    dockerfilePath: apps/main-api/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "8090"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: verza-main-db
+          property: connectionString
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_ISSUER
+        value: verza
+      - key: JWT_AUDIENCE
+        value: verza
+      - key: ACCESS_TOKEN_TTL_SECONDS
+        value: "900"
+      - key: REFRESH_TOKEN_TTL_SECONDS
+        value: "2592000"
+      - key: ENCRYPTION_MASTER_KEY_B64
+        sync: false
+      - key: RECEIPT_ED25519_SEED_B64
+        sync: false
+      - key: IDENTITY_GATEWAY_URL
+        value: http://identity-gateway:8088
+      - key: IDENTITY_RETENTION_DAYS
+        value: "0"
+      - key: CORS_ALLOWED_ORIGINS
+        value: ""
+      - key: LOG_LEVEL
+        value: info
+      - key: METRICS_ENABLED
+        value: "0"
+
+  - type: web
+    name: identity-gateway
+    env: docker
+    plan: standard
+    autoDeploy: true
+    dockerfilePath: apps/identity-gateway/Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    envVars:
+      - key: PORT
+        value: "8088"
+      - key: ORCHESTRATOR_URL
+        value: http://identity-orchestrator:8089
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_ISSUER
+        value: verza
+      - key: JWT_AUDIENCE
+        value: verza
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_FORCE_PATH_STYLE
+        value: "0"
+      - key: CORS_ALLOWED_ORIGINS
+        value: ""
+      - key: LOG_LEVEL
+        value: info
+      - key: METRICS_ENABLED
+        value: "1"
+
+  - type: pserv
+    name: identity-orchestrator
+    env: docker
+    plan: standard
+    autoDeploy: true
+    dockerfilePath: apps/identity-orchestrator/Dockerfile
+    dockerContext: .
+    envVars:
+      - key: PORT
+        value: "8089"
+      - key: IDENTITY_DATABASE_URL
+        fromDatabase:
+          name: verza-identity-db
+          property: connectionString
+      - key: INFERENCE_URL
+        value: http://inference:8087
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_ISSUER
+        value: verza
+      - key: JWT_AUDIENCE
+        value: verza
+      - key: IDENTITY_RETENTION_DAYS
+        value: "0"
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_FORCE_PATH_STYLE
+        value: "0"
+      - key: CORS_ALLOWED_ORIGINS
+        value: ""
+      - key: LOG_LEVEL
+        value: info
+      - key: METRICS_ENABLED
+        value: "1"
+
+  - type: pserv
+    name: inference
+    env: docker
+    plan: standard
+    autoDeploy: true
+    dockerfilePath: apps/inference/Dockerfile
+    dockerContext: .
+    envVars:
+      - key: PORT
+        value: "8087"
+
+databases:
+  - name: verza-main-db
+    plan: standard
+  - name: verza-identity-db
+    plan: standard
