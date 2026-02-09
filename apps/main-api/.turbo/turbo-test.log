@@ -3,60 +3,90 @@
 > node --test --test-force-exit dist/**/*.test.js
 
 TAP version 13
-# Subtest: auth flow: signup -> login -> refresh -> logout
-ok 1 - auth flow: signup -> login -> refresh -> logout
+# Subtest: sanitizeAuditData drops common secret keys (case-insensitive, nested)
+ok 1 - sanitizeAuditData drops common secret keys (case-insensitive, nested)
   ---
-  duration_ms: 1116.2685
+  duration_ms: 55.9279
+  type: 'test'
+  ...
+# Subtest: sanitizeAuditData truncates long strings
+ok 2 - sanitizeAuditData truncates long strings
+  ---
+  duration_ms: 0.7453
+  type: 'test'
+  ...
+# Subtest: sanitizeAuditData stays stable under repeated calls
+ok 3 - sanitizeAuditData stays stable under repeated calls
+  ---
+  duration_ms: 97.3867
+  type: 'test'
+  ...
+# Subtest: auth flow: signup -> login -> refresh -> logout
+ok 4 - auth flow: signup -> login -> refresh -> logout
+  ---
+  duration_ms: 2100.9724
   type: 'test'
   ...
 # Subtest: POST /forgot-password is always ok (no user)
-ok 2 - POST /forgot-password is always ok (no user)
+ok 5 - POST /forgot-password is always ok (no user)
   ---
-  duration_ms: 241.8493
+  duration_ms: 404.8595
   type: 'test'
   ...
 # Subtest: credentials: store encrypts and get decrypts roundtrip
-ok 3 - credentials: store encrypts and get decrypts roundtrip
+ok 6 - credentials: store encrypts and get decrypts roundtrip
   ---
-  duration_ms: 387.1311
+  duration_ms: 606.6709
   type: 'test'
   ...
 # Subtest: fiat/stripe: webhook handles paid/refunded/disputed and idempotency
-ok 4 - fiat/stripe: webhook handles paid/refunded/disputed and idempotency
+ok 7 - fiat/stripe: webhook handles paid/refunded/disputed and idempotency
   ---
-  duration_ms: 318.4529
+  duration_ms: 250.2011
   type: 'test'
   ...
 # Subtest: fiat/stripe: reconcile updates pending sessions and writes ledger
-ok 5 - fiat/stripe: reconcile updates pending sessions and writes ledger
+ok 8 - fiat/stripe: reconcile updates pending sessions and writes ledger
   ---
-  duration_ms: 99.7235
+  duration_ms: 36.3669
   type: 'test'
   ...
 # Subtest: admin/bridge: auth required and workflows behave
-ok 6 - admin/bridge: auth required and workflows behave
+ok 9 - admin/bridge: auth required and workflows behave
   ---
-  duration_ms: 81.1751
+  duration_ms: 71.7294
   type: 'test'
   ...
 # Subtest: admin/institutions: api keys and members workflows behave
-ok 7 - admin/institutions: api keys and members workflows behave
+ok 10 - admin/institutions: api keys and members workflows behave
   ---
-  duration_ms: 112.9798
+  duration_ms: 136.1925
   type: 'test'
   ...
 # Subtest: identity verifications orchestrator flow via gateway
-ok 8 - identity verifications orchestrator flow via gateway
+ok 11 - identity verifications orchestrator flow via gateway
   ---
-  duration_ms: 652.1456
+  duration_ms: 583.5005
   type: 'test'
   ...
-1..8
-# tests 8
+# Subtest: identity verifications burst create/run/status stays healthy
+ok 12 - identity verifications burst create/run/status stays healthy
+  ---
+  duration_ms: 564.3088
+  type: 'test'
+  ...
+# Subtest: identity verifications orchestrator flow surfaces gateway failures
+ok 13 - identity verifications orchestrator flow surfaces gateway failures
+  ---
+  duration_ms: 45.0112
+  type: 'test'
+  ...
+1..13
+# tests 13
 # suites 0
-# pass 8
+# pass 13
 # fail 0
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 4803.9482
+# duration_ms 13736.6722

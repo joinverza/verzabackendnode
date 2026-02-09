@@ -199,7 +199,8 @@ void test("identity verifications orchestrator flow via gateway", async () => {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    (req as any).auth = { userId: "user-1", role: "user", sessionId: "sess-1", email: "u@example.com", tenantId: "t-1" };
+    const headerUser = typeof req.headers["x-test-user"] === "string" ? req.headers["x-test-user"] : "user-1";
+    (req as any).auth = { userId: headerUser, role: "user", sessionId: `sess-${headerUser}`, email: "u@example.com", tenantId: "t-1" };
     next();
   });
 
@@ -326,6 +327,250 @@ void test("identity verifications orchestrator flow via gateway", async () => {
 
   assert.ok(gatewaySeen.some((x) => x.path === "/v1/verifications"));
   assert.ok(gatewaySeen.some((x) => x.path === "/v1/verifications/prov-1"));
+
+  await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  await new Promise<void>((resolve, reject) => gatewayServer.close((err) => (err ? reject(err) : resolve())));
+});
+
+void test("identity verifications burst create/run/status stays healthy", async () => {
+  const gateway = express();
+  gateway.use(express.json());
+  let providerSeq = 0;
+  gateway.post("/v1/verifications", (_req, res) => {
+    providerSeq += 1;
+    res.json({ id: `prov-${providerSeq}`, status: "created" });
+  });
+  gateway.get("/v1/verifications/:id", (req, res) => {
+    res.json({ id: req.params.id, user_id: "user-1", type: "kyc", subject_id: null, status: "completed", attempt_count: 1, last_error: "", completed_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+  });
+  gateway.post("/v1/verifications/:id/run", (_req, res) => {
+    res.json({ status: "completed" });
+  });
+  const gatewayServer = createServer(gateway);
+  await new Promise<void>((resolve) => gatewayServer.listen(0, "127.0.0.1", resolve));
+  const gatewayAddr = gatewayServer.address() as any;
+  const gatewayUrl = `http://127.0.0.1:${gatewayAddr.port}`;
+
+  const verificationsById = new Map<string, any>();
+  const auditByVerification = new Map<string, any[]>();
+  const auditChains = new Map<string, { next_seq: number; head_hash: string }>();
+
+  const pool = {
+    query: async (sql: string, params: unknown[] = []) => {
+      const q = sql.replace(/\s+/g, " ").trim().toLowerCase();
+
+      if (q === "begin" || q === "commit" || q === "rollback") {
+        return { rowCount: 0, rows: [] };
+      }
+
+      if (q.startsWith("select next_seq, head_hash from audit_chains where tenant_id=$1 and stream=$2")) {
+        const [tenantId, stream] = params as [string, string];
+        const key = `${tenantId}:${stream}`;
+        const row = auditChains.get(key);
+        if (!row) return { rowCount: 0, rows: [] };
+        return { rowCount: 1, rows: [{ next_seq: row.next_seq, head_hash: row.head_hash }] };
+      }
+
+      if (q.startsWith("insert into audit_chains (tenant_id, stream, next_seq, head_hash, updated_at) values")) {
+        const [tenantId, stream] = params as [string, string];
+        const key = `${tenantId}:${stream}`;
+        if (!auditChains.has(key)) auditChains.set(key, { next_seq: 1, head_hash: "" });
+        return { rowCount: 1, rows: [] };
+      }
+
+      if (q.startsWith("update audit_chains set next_seq=next_seq+1, head_hash=$1, updated_at=$2 where tenant_id=$3 and stream=$4")) {
+        const [headHash, , tenantId, stream] = params as [string, unknown, string, string];
+        const key = `${tenantId}:${stream}`;
+        const row = auditChains.get(key) ?? { next_seq: 1, head_hash: "" };
+        auditChains.set(key, { next_seq: row.next_seq + 1, head_hash: headHash });
+        return { rowCount: 1, rows: [] };
+      }
+
+      if (q.startsWith("insert into audit_events (id,tenant_id,stream,seq,prev_hash,event_hash,event_type")) {
+        return { rowCount: 1, rows: [] };
+      }
+
+      if (q.startsWith("insert into identity_verifications")) {
+        const [id, tenant_id, user_id, credential_id, status, provider, document_type, confidence_threshold, scores_json, reasons_json, signals_json, locale, client_timestamp, geo_lat, geo_lon, ip, user_agent, server_received_at, standard, verifier_reference] =
+          params as any[];
+        verificationsById.set(id, {
+          id,
+          tenant_id,
+          user_id,
+          credential_id,
+          status,
+          provider,
+          document_type,
+          confidence_threshold,
+          scores_json,
+          reasons_json,
+          signals_json,
+          locale,
+          client_timestamp,
+          geo_lat,
+          geo_lon,
+          ip,
+          user_agent,
+          server_received_at,
+          standard,
+          verifier_reference,
+          completed_at: null,
+          verifier_institution_id: null
+        });
+        return { rowCount: 1, rows: [] };
+      }
+
+      if (q.startsWith("insert into identity_verification_audit_events")) {
+        const [id, tenant_id, verification_id, user_id, event_type, data_json, created_at] = params as any[];
+        const arr = auditByVerification.get(verification_id) ?? [];
+        arr.push({ id, tenant_id, verification_id, user_id, event_type, data_json, created_at });
+        auditByVerification.set(verification_id, arr);
+        return { rowCount: 1, rows: [] };
+      }
+
+      if (q.startsWith("select id,user_id,credential_id,status,provider")) {
+        const [tenantId, userId] = params as [string, string];
+        const rows = [...verificationsById.values()].filter((r) => r.tenant_id === tenantId && r.user_id === userId);
+        return { rowCount: rows.length, rows };
+      }
+
+      if (q.startsWith("select provider, verifier_reference from identity_verifications where id=$1 and tenant_id=$2")) {
+        const [id, tenantId] = params as [string, string];
+        const row = verificationsById.get(id);
+        if (!row || row.tenant_id !== tenantId) return { rowCount: 0, rows: [] };
+        return { rowCount: row ? 1 : 0, rows: row ? [{ provider: row.provider, verifier_reference: row.verifier_reference }] : [] };
+      }
+
+      if (q.startsWith("select status, provider, verifier_reference from identity_verifications where id=$1 and tenant_id=$2")) {
+        const [id, tenantId] = params as [string, string];
+        const row = verificationsById.get(id);
+        if (!row || row.tenant_id !== tenantId) return { rowCount: 0, rows: [] };
+        return { rowCount: 1, rows: [{ status: row.status, provider: row.provider, verifier_reference: row.verifier_reference }] };
+      }
+
+      if (q.startsWith("update identity_verifications set status=$1")) {
+        const [status, completedAt, id] = params as [string, Date, string];
+        const row = verificationsById.get(id);
+        if (!row) return { rowCount: 0, rows: [] };
+        row.status = status;
+        if (status !== "pending" && !row.completed_at) row.completed_at = completedAt;
+        return { rowCount: 1, rows: [] };
+      }
+
+      throw new Error(`Unhandled SQL in test stub: ${sql}`);
+    }
+  } as any;
+
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    (req as any).auth = { userId: "user-1", role: "user", sessionId: "sess-1", email: "u@example.com", tenantId: "t-1" };
+    next();
+  });
+  app.use(
+    "/identity/verifications",
+    createIdentityVerificationsRouter({
+      pool,
+      logger: { error: () => {}, info: () => {} } as any,
+      config: { IDENTITY_GATEWAY_URL: gatewayUrl } as any
+    } as any)
+  );
+  app.use(notFoundHandler);
+  app.use(errorHandler());
+
+  const server = createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const addr = server.address() as any;
+  const baseUrl = `http://127.0.0.1:${addr.port}`;
+
+  const createdByUser = new Map<string, string[]>();
+  for (let i = 0; i < 15; i += 1) {
+    const userId = `user-${Math.floor(i / 5) + 1}`;
+    const created = await fetch(`${baseUrl}/identity/verifications/request`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer token", "x-test-user": userId },
+      body: JSON.stringify({ provider: "orchestrator", document_type: "kyc" })
+    });
+    assert.equal(created.status, 201);
+    const createdJson = (await created.json()) as any;
+    const arr = createdByUser.get(userId) ?? [];
+    arr.push(String(createdJson.id));
+    createdByUser.set(userId, arr);
+
+    const run = await fetch(`${baseUrl}/identity/verifications/${createdJson.id}/run`, {
+      method: "POST",
+      headers: { authorization: "Bearer token", "idempotency-key": `k-${i}`, "x-test-user": userId }
+    });
+    assert.equal(run.status, 200);
+
+    const status = await fetch(`${baseUrl}/identity/verifications/${createdJson.id}/status`, {
+      method: "POST",
+      headers: { authorization: "Bearer token", "x-test-user": userId }
+    });
+    assert.equal(status.status, 200);
+    assert.deepEqual(await status.json(), { id: createdJson.id, status: "completed" });
+  }
+
+  for (const [userId, ids] of createdByUser.entries()) {
+    const list = await fetch(`${baseUrl}/identity/verifications`, {
+      headers: { authorization: "Bearer token", "x-test-user": userId }
+    });
+    assert.equal(list.status, 200);
+    const listJson = (await list.json()) as any[];
+    for (const id of ids) assert.ok(listJson.some((v) => v.id === id));
+  }
+
+  await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  await new Promise<void>((resolve, reject) => gatewayServer.close((err) => (err ? reject(err) : resolve())));
+});
+
+void test("identity verifications orchestrator flow surfaces gateway failures", async () => {
+  const gateway = express();
+  gateway.use(express.json());
+  gateway.post("/v1/verifications", (_req, res) => {
+    res.status(500).json({ error: { code: "upstream", message: "gateway failed" } });
+  });
+  const gatewayServer = createServer(gateway);
+  await new Promise<void>((resolve) => gatewayServer.listen(0, "127.0.0.1", resolve));
+  const gatewayAddr = gatewayServer.address() as any;
+  const gatewayUrl = `http://127.0.0.1:${gatewayAddr.port}`;
+
+  const pool = {
+    query: async () => {
+      throw new Error("DB should not be called when gateway fails");
+    }
+  } as any;
+
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    (req as any).auth = { userId: "user-1", role: "user", sessionId: "sess-1", email: "u@example.com", tenantId: "t-1" };
+    next();
+  });
+  app.use(
+    "/identity/verifications",
+    createIdentityVerificationsRouter({
+      pool,
+      logger: { error: () => {}, info: () => {} } as any,
+      config: { IDENTITY_GATEWAY_URL: gatewayUrl } as any
+    } as any)
+  );
+  app.use(notFoundHandler);
+  app.use(errorHandler());
+
+  const server = createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const addr = server.address() as any;
+  const baseUrl = `http://127.0.0.1:${addr.port}`;
+
+  const resp = await fetch(`${baseUrl}/identity/verifications/request`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer token" },
+    body: JSON.stringify({ provider: "orchestrator", document_type: "kyc" })
+  });
+  assert.equal(resp.status, 400);
+  const json = (await resp.json()) as any;
+  assert.equal(json?.error?.code, "upstream");
 
   await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
   await new Promise<void>((resolve, reject) => gatewayServer.close((err) => (err ? reject(err) : resolve())));

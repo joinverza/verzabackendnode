@@ -29,6 +29,32 @@ const mainApiSchema = baseSchema.extend({
     RECEIPT_ED25519_SEED_B64: z.string().min(1),
     IDENTITY_GATEWAY_URL: z.string().optional(),
     IDENTITY_RETENTION_DAYS: z.coerce.number().int().nonnegative().optional().default(0),
+    COMPLIANCE_S3_ENDPOINT: z.string().optional(),
+    COMPLIANCE_S3_ACCESS_KEY_ID: z.string().optional(),
+    COMPLIANCE_S3_SECRET_ACCESS_KEY: z.string().optional(),
+    COMPLIANCE_S3_BUCKET: z.string().optional(),
+    COMPLIANCE_S3_REGION: z.string().optional(),
+    COMPLIANCE_S3_FORCE_PATH_STYLE: z
+        .string()
+        .optional()
+        .default("0")
+        .transform((v) => v === "1" || v.toLowerCase() === "true"),
+    COMPLIANCE_S3_OBJECT_LOCK_DAYS: z.coerce.number().int().positive().optional().default(3650),
+    COMPLIANCE_WORM_ENFORCE: z
+        .string()
+        .optional()
+        .default("0")
+        .transform((v) => v === "1" || v.toLowerCase() === "true"),
+    AUDIT_ANCHOR_URL: z.string().optional(),
+    AUDIT_ANCHOR_SECRET: z.string().optional(),
+    AUDIT_ANCHOR_INTERVAL_SECONDS: z.coerce.number().int().positive().optional().default(3600),
+    RETENTION_JOB_ENABLED: z
+        .string()
+        .optional()
+        .default("0")
+        .transform((v) => v === "1" || v.toLowerCase() === "true"),
+    RETENTION_JOB_INTERVAL_SECONDS: z.coerce.number().int().positive().optional().default(86400),
+    DSAR_FOUR_EYES_REQUIRED: z.coerce.number().int().positive().optional().default(2),
     DID_SESSION_SECRET: z.string().optional(),
     REQUIRE_ADMIN_2FA: z
         .string()

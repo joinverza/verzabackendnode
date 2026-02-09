@@ -1,16 +1,20 @@
 import type { AddressInfo } from "node:net";
 import http from "node:http";
+import crypto from "node:crypto";
 
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { createMainApiConfig } from "@verza/config";
+import { canonicalJson, sha256Hex, signReceipt } from "@verza/crypto";
 import { createPgPool, migrateDatabase } from "@verza/db";
 import { createHttpApp, errorHandler, notFoundHandler } from "@verza/http";
-import { createLogger } from "@verza/observability";
+import { createLogger, initTelemetry } from "@verza/observability";
 import promClient from "prom-client";
 import { createClient } from "redis";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
 import { registerMainApiRoutes } from "./v1/routes.js";
+import { appendAuditEvent } from "./v1/routers/auditLog.js";
 import {
   authTokensResponseSchema,
   forgotPasswordSchema,
@@ -35,6 +39,7 @@ import {
 export async function createMainApiServer() {
   const config = createMainApiConfig(process.env);
   const logger = createLogger({ service: "main-api", level: config.LOG_LEVEL });
+  const telemetry = await initTelemetry({ serviceName: "main-api" });
   const pool = createPgPool(config.DATABASE_URL);
 
   await migrateDatabase({
@@ -133,6 +138,8 @@ export async function createMainApiServer() {
   app.use(errorHandler());
 
   const server = http.createServer(app);
+  let stopAuditAnchorJob: null | (() => void) = null;
+  let stopRetentionJob: null | (() => void) = null;
 
   return {
     start: async () => {
@@ -141,13 +148,18 @@ export async function createMainApiServer() {
       });
       const addr = server.address() as AddressInfo;
       logger.info({ addr }, "main-api listening");
+      if (!stopAuditAnchorJob) stopAuditAnchorJob = startAuditAnchorJob({ pool, config, logger });
+      if (!stopRetentionJob) stopRetentionJob = startRetentionJob({ pool, config, logger });
     },
     stop: async () => {
+      if (stopAuditAnchorJob) stopAuditAnchorJob();
+      if (stopRetentionJob) stopRetentionJob();
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
       });
       if (redis?.isOpen) await redis.quit();
       await pool.end();
+      await telemetry.shutdown();
     }
   };
 }
@@ -163,6 +175,337 @@ async function purgeMainIdentityRetention(opts: { pool: ReturnType<typeof create
   } catch (err) {
     opts.logger.error({ err }, "identity retention purge failed");
   }
+}
+
+function unrefTimer(timer: ReturnType<typeof setInterval>) {
+  if (typeof timer !== "object" || !timer) return;
+  const maybe = timer as unknown as { unref?: unknown };
+  if (typeof maybe.unref !== "function") return;
+  (timer as unknown as { unref: () => void }).unref();
+}
+
+function startAuditAnchorJob(opts: {
+  pool: ReturnType<typeof createPgPool>;
+  config: ReturnType<typeof createMainApiConfig>;
+  logger: ReturnType<typeof createLogger>;
+}) {
+  const intervalSecondsRaw = Number(opts.config.AUDIT_ANCHOR_INTERVAL_SECONDS ?? 0);
+  const intervalSeconds = Number.isFinite(intervalSecondsRaw) ? Math.max(0, Math.floor(intervalSecondsRaw)) : 0;
+  if (!intervalSeconds) return () => void 0;
+
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      await runAuditAnchorJobOnce(opts);
+    } catch (err) {
+      opts.logger.error({ err }, "audit anchor job failed");
+    } finally {
+      running = false;
+    }
+  };
+
+  void tick();
+  const timer = setInterval(() => void tick(), intervalSeconds * 1000);
+  unrefTimer(timer);
+  return () => clearInterval(timer);
+}
+
+async function runAuditAnchorJobOnce(opts: {
+  pool: ReturnType<typeof createPgPool>;
+  config: ReturnType<typeof createMainApiConfig>;
+}) {
+  const anchorUrl = String(opts.config.AUDIT_ANCHOR_URL ?? "").trim();
+  const anchorSecret = String(opts.config.AUDIT_ANCHOR_SECRET ?? "").trim();
+
+  const storeToWorm = opts.config.COMPLIANCE_WORM_ENFORCE ? true : Boolean(createComplianceS3ClientIfConfigured(opts.config));
+  const s3 = storeToWorm ? createComplianceS3ClientIfConfigured(opts.config) : null;
+  if (storeToWorm && !s3) throw new Error("WORM storage not configured");
+
+  const chains = await opts.pool.query<{ tenant_id: string; stream: string; head_hash: string; next_seq: string | number; updated_at: Date }>(
+    "select tenant_id,stream,head_hash,next_seq,updated_at from audit_chains"
+  );
+
+  for (const chain of chains.rows) {
+    const anchoredAt = new Date();
+    const stream = (chain.stream ?? "tenant").trim() || "tenant";
+    const payload = {
+      type: "audit_chain_anchor",
+      tenant_id: chain.tenant_id,
+      stream,
+      head_hash: chain.head_hash ?? "",
+      next_seq: Number(chain.next_seq ?? 1),
+      chain_updated_at: chain.updated_at?.toISOString?.() ?? null,
+      anchored_at: anchoredAt.toISOString()
+    };
+    const payloadJson = canonicalJson(payload);
+    const payloadSha = sha256Hex(payloadJson);
+    const signed = signReceipt({ seedB64: opts.config.RECEIPT_ED25519_SEED_B64, receipt: payload });
+
+    const anchorId = crypto.randomUUID();
+    await opts.pool.query(
+      "insert into audit_chain_anchors (id,tenant_id,stream,head_hash,next_seq,anchored_at,payload_json,sig_kid,sig_b64,anchor_target) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+      [anchorId, chain.tenant_id, stream, payload.head_hash, payload.next_seq, anchoredAt, payloadJson, signed.sig_kid, signed.sig_b64, anchorUrl]
+    );
+
+    let evidence: { evidence_id: string; bucket: string; key: string; retain_until: string; object_sha256: string } | null = null;
+    if (s3) {
+      const now = new Date();
+      const retainUntil = new Date(now.getTime() + opts.config.COMPLIANCE_S3_OBJECT_LOCK_DAYS * 24 * 60 * 60 * 1000);
+      const key = buildWormKey({
+        prefix: "audit_anchors",
+        tenantId: chain.tenant_id,
+        stream,
+        createdAtMs: now.getTime(),
+        sha256: payloadSha,
+        suffix: "json"
+      });
+      const bodyBuf = Buffer.from(payloadJson, "utf8");
+      const bodySha = sha256Hex(bodyBuf);
+      await s3.client.send(
+        new PutObjectCommand({
+          Bucket: s3.bucket,
+          Key: key,
+          Body: bodyBuf,
+          ContentType: "application/json",
+          ObjectLockMode: "COMPLIANCE",
+          ObjectLockRetainUntilDate: retainUntil,
+          Metadata: { tenant_id: chain.tenant_id, stream, payload_sha256: payloadSha, object_sha256: bodySha }
+        })
+      );
+
+      const evidenceId = crypto.randomUUID();
+      await opts.pool.query(
+        "insert into evidence_objects (id,tenant_id,owner_user_id,subject_type,subject_id,content_type,content_sha256,storage,blob_b64,created_at,created_at_ms) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+        [
+          evidenceId,
+          chain.tenant_id,
+          null,
+          "audit_anchor",
+          anchorId,
+          "application/json",
+          bodySha,
+          "external",
+          Buffer.from(JSON.stringify({ provider: "s3", bucket: s3.bucket, key, payload_sha256: payloadSha, retain_until: retainUntil.toISOString() }), "utf8").toString(
+            "base64"
+          ),
+          now,
+          now.getTime()
+        ]
+      );
+
+      evidence = { evidence_id: evidenceId, bucket: s3.bucket, key, retain_until: retainUntil.toISOString(), object_sha256: bodySha };
+    }
+
+    if (anchorUrl) {
+      try {
+        await fetch(anchorUrl, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(anchorSecret ? { "x-anchor-secret": anchorSecret } : {})
+          },
+          body: JSON.stringify({ ...payload, ...signed, payload_sha256: payloadSha })
+        });
+      } catch {
+        void 0;
+      }
+    }
+
+    await appendAuditEvent(opts.pool, {
+      tenantId: chain.tenant_id,
+      eventType: "audit_anchor_job_created",
+      actorType: "system",
+      actorId: "audit_anchor_job",
+      subjectType: "audit_chain_anchor",
+      subjectId: anchorId,
+      data: { stream, head_hash: payload.head_hash, next_seq: payload.next_seq, payload_sha256: payloadSha, evidence }
+    });
+  }
+}
+
+function startRetentionJob(opts: {
+  pool: ReturnType<typeof createPgPool>;
+  config: ReturnType<typeof createMainApiConfig>;
+  logger: ReturnType<typeof createLogger>;
+}) {
+  const enabled = Boolean(opts.config.RETENTION_JOB_ENABLED);
+  if (!enabled) return () => void 0;
+  const intervalSecondsRaw = Number(opts.config.RETENTION_JOB_INTERVAL_SECONDS ?? 0);
+  const intervalSeconds = Number.isFinite(intervalSecondsRaw) ? Math.max(1, Math.floor(intervalSecondsRaw)) : 0;
+  if (!intervalSeconds) return () => void 0;
+
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      await runRetentionJobOnce(opts);
+    } catch (err) {
+      opts.logger.error({ err }, "retention job failed");
+    } finally {
+      running = false;
+    }
+  };
+
+  void tick();
+  const timer = setInterval(() => void tick(), intervalSeconds * 1000);
+  unrefTimer(timer);
+  return () => clearInterval(timer);
+}
+
+async function runRetentionJobOnce(opts: {
+  pool: ReturnType<typeof createPgPool>;
+  config: ReturnType<typeof createMainApiConfig>;
+  logger: ReturnType<typeof createLogger>;
+}) {
+  const storeToWorm = opts.config.COMPLIANCE_WORM_ENFORCE ? true : Boolean(createComplianceS3ClientIfConfigured(opts.config));
+  const s3 = storeToWorm ? createComplianceS3ClientIfConfigured(opts.config) : null;
+  if (storeToWorm && !s3) throw new Error("WORM storage not configured");
+
+  const tenants = await opts.pool.query<{ tenant_id: string }>("select distinct tenant_id from retention_policies");
+  for (const t of tenants.rows) {
+    try {
+      const policies = await opts.pool.query<{ resource_type: string; retention_days: number; action: string }>(
+        "select resource_type,retention_days,action from retention_policies where tenant_id=$1",
+        [t.tenant_id]
+      );
+      const results: Array<{ tenant_id: string; resource_type: string; action: string; cutoff: string; deleted: number }> = [];
+      for (const p of policies.rows) {
+        if (!p.retention_days || p.retention_days <= 0) continue;
+        const cutoff = new Date(Date.now() - p.retention_days * 24 * 60 * 60 * 1000);
+        if (p.resource_type === "identity_verifications" && p.action === "delete") {
+          const del = await opts.pool.query("delete from identity_verifications where tenant_id=$1 and server_received_at < $2", [t.tenant_id, cutoff]);
+          results.push({ tenant_id: t.tenant_id, resource_type: p.resource_type, action: p.action, cutoff: cutoff.toISOString(), deleted: del.rowCount ?? 0 });
+        }
+      }
+
+      const ranAt = new Date();
+      const report = {
+        type: "retention_run_report",
+        tenant_id: t.tenant_id,
+        ran_at: ranAt.toISOString(),
+        results: results.map((r) => ({ ...r, deleted: Number(r.deleted ?? 0) }))
+      };
+      const reportJson = canonicalJson(report);
+      const reportSha = sha256Hex(reportJson);
+      const signed = signReceipt({ seedB64: opts.config.RECEIPT_ED25519_SEED_B64, receipt: report });
+      const envelopeJson = canonicalJson({ report, report_sha256: reportSha, ...signed });
+      const envelopeSha = sha256Hex(envelopeJson);
+
+      const retentionRunId = crypto.randomUUID();
+      const evidenceId = crypto.randomUUID();
+      const createdAtMs = ranAt.getTime();
+      let evidence: { evidence_id: string; bucket?: string; key?: string; retain_until?: string; object_sha256: string } | null = null;
+
+      if (s3) {
+        const retainUntil = new Date(ranAt.getTime() + opts.config.COMPLIANCE_S3_OBJECT_LOCK_DAYS * 24 * 60 * 60 * 1000);
+        const key = buildWormKey({
+          prefix: "retention_runs",
+          tenantId: t.tenant_id,
+          stream: "retention",
+          createdAtMs,
+          sha256: reportSha,
+          suffix: "json"
+        });
+        const bodyBuf = Buffer.from(envelopeJson, "utf8");
+        const bodySha = sha256Hex(bodyBuf);
+        await s3.client.send(
+          new PutObjectCommand({
+            Bucket: s3.bucket,
+            Key: key,
+            Body: bodyBuf,
+            ContentType: "application/json",
+            ObjectLockMode: "COMPLIANCE",
+            ObjectLockRetainUntilDate: retainUntil,
+            Metadata: { tenant_id: t.tenant_id, report_sha256: reportSha, object_sha256: bodySha, sig_kid: signed.sig_kid }
+          })
+        );
+        await opts.pool.query(
+          "insert into evidence_objects (id,tenant_id,owner_user_id,subject_type,subject_id,content_type,content_sha256,storage,blob_b64,created_at,created_at_ms) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+          [
+            evidenceId,
+            t.tenant_id,
+            null,
+            "retention_run_report",
+            retentionRunId,
+            "application/json",
+            bodySha,
+            "external",
+            Buffer.from(
+              JSON.stringify({ provider: "s3", bucket: s3.bucket, key, report_sha256: reportSha, sig_kid: signed.sig_kid, sig_b64: signed.sig_b64, retain_until: retainUntil.toISOString() }),
+              "utf8"
+            ).toString("base64"),
+            ranAt,
+            createdAtMs
+          ]
+        );
+        evidence = { evidence_id: evidenceId, bucket: s3.bucket, key, retain_until: retainUntil.toISOString(), object_sha256: bodySha };
+      } else {
+        await opts.pool.query(
+          "insert into evidence_objects (id,tenant_id,owner_user_id,subject_type,subject_id,content_type,content_sha256,storage,blob_b64,created_at,created_at_ms) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+          [
+            evidenceId,
+            t.tenant_id,
+            null,
+            "retention_run_report",
+            retentionRunId,
+            "application/json",
+            envelopeSha,
+            "inline",
+            Buffer.from(envelopeJson, "utf8").toString("base64"),
+            ranAt,
+            createdAtMs
+          ]
+        );
+        evidence = { evidence_id: evidenceId, object_sha256: envelopeSha };
+      }
+
+      await opts.pool.query("insert into retention_runs (id,tenant_id,ran_at,report_sha256,evidence_id) values ($1,$2,$3,$4,$5)", [
+        retentionRunId,
+        t.tenant_id,
+        ranAt,
+        reportSha,
+        evidenceId
+      ]);
+
+      await appendAuditEvent(opts.pool, {
+        tenantId: t.tenant_id,
+        eventType: "retention_job_run",
+        actorType: "system",
+        actorId: "retention_job",
+        subjectType: "retention_run",
+        subjectId: retentionRunId,
+        data: { report_sha256: reportSha, evidence, results: results.map((r) => ({ ...r, deleted: Number(r.deleted ?? 0) })) }
+      });
+    } catch (err) {
+      opts.logger.error({ err, tenant_id: t.tenant_id }, "retention job tenant run failed");
+    }
+  }
+}
+
+function createComplianceS3ClientIfConfigured(config: ReturnType<typeof createMainApiConfig>) {
+  const endpoint = String(config.COMPLIANCE_S3_ENDPOINT ?? "").trim();
+  const accessKeyId = String(config.COMPLIANCE_S3_ACCESS_KEY_ID ?? "").trim();
+  const secretAccessKey = String(config.COMPLIANCE_S3_SECRET_ACCESS_KEY ?? "").trim();
+  const bucket = String(config.COMPLIANCE_S3_BUCKET ?? "").trim();
+  const region = String(config.COMPLIANCE_S3_REGION ?? "").trim();
+  if (!endpoint || !accessKeyId || !secretAccessKey || !bucket || !region) return null;
+  return {
+    bucket,
+    client: new S3Client({
+      region,
+      endpoint,
+      forcePathStyle: config.COMPLIANCE_S3_FORCE_PATH_STYLE ?? false,
+      credentials: { accessKeyId, secretAccessKey }
+    })
+  };
+}
+
+function buildWormKey(opts: { prefix: string; tenantId: string; stream: string; createdAtMs: number; sha256: string; suffix: string }) {
+  const safeStream = opts.stream.replaceAll(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64) || "tenant";
+  return `compliance/${opts.prefix}/tenant=${opts.tenantId}/stream=${safeStream}/at_ms=${opts.createdAtMs}/${opts.sha256}.${opts.suffix}`;
 }
 
 function buildOpenApiSpec(input: { title: string; version: string; serverUrl: string }) {

@@ -287,11 +287,10 @@ void test("admin/bridge: auth required and workflows behave", async () => {
         created_at: new Date(),
         updated_at: new Date()
     });
+    const auditChains = new Map();
     const pool = {
         query: async (sql, params = []) => {
             const q = sql.replace(/\s+/g, " ").trim().toLowerCase();
-            const auditChains = pool._auditChains ?? new Map();
-            pool._auditChains = auditChains;
             if (q === "begin" || q === "commit" || q === "rollback") {
                 return { rowCount: 0, rows: [] };
             }
@@ -414,11 +413,10 @@ void test("admin/institutions: api keys and members workflows behave", async () 
     const memberByInstitutionUser = new Map();
     const userId = "00000000-0000-0000-0000-000000000301";
     users.set(userId, { id: userId, email: "u@example.com", name: "User" });
+    const auditChains = new Map();
     const pool = {
         query: async (sql, params = []) => {
             const q = sql.replace(/\s+/g, " ").trim().toLowerCase();
-            const auditChains = pool._auditChains ?? new Map();
-            pool._auditChains = auditChains;
             if (q === "begin" || q === "commit" || q === "rollback") {
                 return { rowCount: 0, rows: [] };
             }

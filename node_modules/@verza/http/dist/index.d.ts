@@ -30,6 +30,8 @@ declare module "express-serve-static-core" {
     interface Request {
         requestId: string;
         bodyRaw?: Buffer;
+        traceId?: string;
+        spanId?: string;
     }
 }
 export declare function errorHandler(): ErrorRequestHandler;

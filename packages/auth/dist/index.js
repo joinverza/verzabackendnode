@@ -67,8 +67,13 @@ export const PERMISSIONS = {
     ADMIN_COMPLIANCE_EVIDENCE_CREATE: "admin.compliance.evidence.create",
     ADMIN_COMPLIANCE_EVIDENCE_READ: "admin.compliance.evidence.read",
     ADMIN_COMPLIANCE_PRIVACY_REQUESTS_LIST: "admin.compliance.privacy.requests.list",
+    ADMIN_COMPLIANCE_PRIVACY_REQUEST_APPROVE: "admin.compliance.privacy.requests.approve",
+    ADMIN_COMPLIANCE_PRIVACY_REQUEST_EXECUTE: "admin.compliance.privacy.requests.execute",
     ADMIN_COMPLIANCE_RETENTION_POLICY_SET: "admin.compliance.privacy.retention.set",
-    ADMIN_COMPLIANCE_RETENTION_RUN: "admin.compliance.privacy.retention.run"
+    ADMIN_COMPLIANCE_RETENTION_RUN: "admin.compliance.privacy.retention.run",
+    ADMIN_COMPLIANCE_AUDIT_ANCHORS_LIST: "admin.compliance.audit.anchors.list",
+    ADMIN_COMPLIANCE_AUDIT_ANCHOR_RUN: "admin.compliance.audit.anchors.run",
+    ADMIN_COMPLIANCE_RETENTION_REPORTS_LIST: "admin.compliance.privacy.retention.reports.list"
 };
 export function requireUser(ctx) {
     return (req, _res, next) => {

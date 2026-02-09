@@ -14,7 +14,7 @@ import { requireUser } from "@verza/auth";
 import { createIdentityOrchestratorConfig } from "@verza/config";
 import { createPgPool, migrateDatabase } from "@verza/db";
 import { badRequest, createHttpApp, createRateLimiter, errorHandler, notFound, notFoundHandler } from "@verza/http";
-import { createLogger } from "@verza/observability";
+import { createLogger, initTelemetry } from "@verza/observability";
 
 const createSessionSchema = z.object({
   user_id: z.string().uuid().optional()
@@ -62,6 +62,7 @@ const QUEUE_KEY = "verza:identity:jobs:v1";
 export async function createIdentityOrchestratorServer() {
   const config = createIdentityOrchestratorConfig(process.env);
   const logger = createLogger({ service: "identity-orchestrator", level: config.LOG_LEVEL });
+  const telemetry = await initTelemetry({ serviceName: "identity-orchestrator" });
   const pool = createPgPool(config.IDENTITY_DATABASE_URL);
 
   await migrateDatabase({ db: "identity", databaseUrl: config.IDENTITY_DATABASE_URL, logger });
@@ -92,6 +93,7 @@ export async function createIdentityOrchestratorServer() {
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
       if (redis?.isOpen) await redis.quit();
       await pool.end();
+      await telemetry.shutdown();
     }
   };
 }

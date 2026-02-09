@@ -10,9 +10,12 @@
   "scripts": {
     "build": "turbo build",
     "dev": "turbo dev",
+    "ci": "npm run lint && npm run typecheck && npm run test && npm run security:audit && npm run build && npm run build:sign",
     "lint": "turbo lint",
+    "security:audit": "npm audit --audit-level=high",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
+    "build:sign": "node sign-build-artifacts.mjs",
     "db:migrate:main": "node packages/db/dist/cli.js migrate --db=main",
     "db:migrate:identity": "node packages/db/dist/cli.js migrate --db=identity"
   },

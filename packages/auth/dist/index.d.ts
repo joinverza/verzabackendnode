@@ -63,8 +63,13 @@ export declare const PERMISSIONS: {
     readonly ADMIN_COMPLIANCE_EVIDENCE_CREATE: "admin.compliance.evidence.create";
     readonly ADMIN_COMPLIANCE_EVIDENCE_READ: "admin.compliance.evidence.read";
     readonly ADMIN_COMPLIANCE_PRIVACY_REQUESTS_LIST: "admin.compliance.privacy.requests.list";
+    readonly ADMIN_COMPLIANCE_PRIVACY_REQUEST_APPROVE: "admin.compliance.privacy.requests.approve";
+    readonly ADMIN_COMPLIANCE_PRIVACY_REQUEST_EXECUTE: "admin.compliance.privacy.requests.execute";
     readonly ADMIN_COMPLIANCE_RETENTION_POLICY_SET: "admin.compliance.privacy.retention.set";
     readonly ADMIN_COMPLIANCE_RETENTION_RUN: "admin.compliance.privacy.retention.run";
+    readonly ADMIN_COMPLIANCE_AUDIT_ANCHORS_LIST: "admin.compliance.audit.anchors.list";
+    readonly ADMIN_COMPLIANCE_AUDIT_ANCHOR_RUN: "admin.compliance.audit.anchors.run";
+    readonly ADMIN_COMPLIANCE_RETENTION_REPORTS_LIST: "admin.compliance.privacy.retention.reports.list";
 };
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 export declare function requireUser(ctx: AuthContext): RequestHandler;

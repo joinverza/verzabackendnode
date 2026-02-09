@@ -7,7 +7,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { requireUser } from "@verza/auth";
 import { createIdentityGatewayConfig } from "@verza/config";
 import { createHttpApp, createRateLimiter, errorHandler, notFoundHandler } from "@verza/http";
-import { createLogger } from "@verza/observability";
+import { createLogger, initTelemetry } from "@verza/observability";
 import promClient from "prom-client";
 import { z } from "zod";
 const sessionsSchema = z.object({
@@ -24,6 +24,7 @@ const createVerificationSchema = z.object({
 export function createIdentityGatewayServer() {
     const config = createIdentityGatewayConfig(process.env);
     const logger = createLogger({ service: "identity-gateway", level: config.LOG_LEVEL });
+    let telemetry = null;
     const app = createHttpApp({ logger, corsAllowedOrigins: config.CORS_ALLOWED_ORIGINS });
     app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
     if (config.METRICS_ENABLED) {
@@ -125,12 +126,16 @@ export function createIdentityGatewayServer() {
     const server = http.createServer(app);
     return {
         start: async () => {
+            if (!telemetry)
+                telemetry = await initTelemetry({ serviceName: "identity-gateway" });
             await new Promise((resolve) => server.listen(config.PORT, config.HOST, resolve));
             logger.info({ addr: server.address() }, "identity-gateway listening");
             return server.address();
         },
         stop: async () => {
             await new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+            if (telemetry)
+                await telemetry.shutdown();
         }
     };
 }

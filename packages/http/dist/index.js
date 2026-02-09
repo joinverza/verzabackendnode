@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import cors from "cors";
 import express from "express";
 import rateLimit from "express-rate-limit";
+import { SpanKind, SpanStatusCode, context, propagation, trace } from "@opentelemetry/api";
 import { pinoHttp } from "pino-http";
 export class HttpError extends Error {
     status;
@@ -29,9 +30,10 @@ export function notFound(code, message, details) {
 export function createHttpApp(opts) {
     const app = express();
     app.use(requestIdMiddleware());
+    app.use(traceMiddleware());
     app.use(pinoHttp({
         logger: opts.logger,
-        customProps: (req) => ({ request_id: req.requestId })
+        customProps: (req) => ({ request_id: req.requestId, trace_id: req.traceId ?? "", span_id: req.spanId ?? "" })
     }));
     app.use(cors({
         origin: (origin, cb) => {
@@ -89,6 +91,56 @@ function requestIdMiddleware() {
         req.requestId = requestId;
         res.setHeader("x-request-id", requestId);
         next();
+    };
+}
+function traceMiddleware() {
+    return (req, res, next) => {
+        const getter = {
+            get: (carrier, key) => {
+                const v = carrier[key.toLowerCase()];
+                if (!v)
+                    return undefined;
+                if (Array.isArray(v))
+                    return v.join(",");
+                return v;
+            },
+            keys: (carrier) => Object.keys(carrier)
+        };
+        const extracted = propagation.extract(context.active(), req.headers, getter);
+        const tracer = trace.getTracer("verza-http");
+        const attrs = {
+            "http.method": req.method,
+            "http.target": req.path,
+            "http.request_id": req.requestId
+        };
+        const ua = req.headers["user-agent"];
+        if (typeof ua === "string" && ua.trim().length)
+            attrs["http.user_agent"] = ua;
+        const routePath = req.route?.path;
+        if (typeof routePath === "string" && routePath.trim().length)
+            attrs["http.route"] = routePath;
+        const span = tracer.startSpan(`${req.method} ${req.path}`, {
+            kind: SpanKind.SERVER,
+            attributes: attrs
+        }, extracted);
+        const sc = span.spanContext();
+        req.traceId = sc.traceId;
+        req.spanId = sc.spanId;
+        const spanCtx = trace.setSpan(extracted, span);
+        const setter = { set: (carrier, key, value) => (carrier[key] = value) };
+        const carrierOut = {};
+        propagation.inject(spanCtx, carrierOut, setter);
+        if (carrierOut.traceparent)
+            res.setHeader("traceparent", carrierOut.traceparent);
+        res.on("finish", () => {
+            span.setAttribute("http.status_code", res.statusCode);
+            if (res.statusCode >= 500)
+                span.setStatus({ code: SpanStatusCode.ERROR });
+            else
+                span.setStatus({ code: SpanStatusCode.OK });
+            span.end();
+        });
+        context.with(spanCtx, next);
     };
 }
 export function errorHandler() {
