@@ -152,10 +152,14 @@ Optional:
 Required:
 
 - PORT: 8088
+- HOST: 0.0.0.0
 - ORCHESTRATOR_URL: http://identity-orchestrator:8089
 - JWT_SECRET: secret, at least 16 chars
 - JWT_ISSUER: verza
 - JWT_AUDIENCE: verza
+
+Optional (required for /v1/media/presign):
+
 - S3_ENDPOINT: S3-compatible endpoint
 - S3_ACCESS_KEY_ID
 - S3_SECRET_ACCESS_KEY

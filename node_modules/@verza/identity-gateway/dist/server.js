@@ -56,15 +56,18 @@ export function createIdentityGatewayServer() {
         config: { JWT_SECRET: config.JWT_SECRET, JWT_ISSUER: config.JWT_ISSUER, JWT_AUDIENCE: config.JWT_AUDIENCE }
     });
     const limiterKey = (req) => (req.auth?.userId ? `u:${req.auth.userId}` : `ip:${req.ip}`);
-    const s3 = new S3Client({
-        region: config.S3_REGION,
-        endpoint: config.S3_ENDPOINT,
-        forcePathStyle: config.S3_FORCE_PATH_STYLE,
-        credentials: {
-            accessKeyId: config.S3_ACCESS_KEY_ID,
-            secretAccessKey: config.S3_SECRET_ACCESS_KEY
-        }
-    });
+    const s3Config = getS3Config(config);
+    const s3 = s3Config
+        ? new S3Client({
+            region: s3Config.region,
+            endpoint: s3Config.endpoint,
+            forcePathStyle: config.S3_FORCE_PATH_STYLE,
+            credentials: {
+                accessKeyId: s3Config.accessKeyId,
+                secretAccessKey: s3Config.secretAccessKey
+            }
+        })
+        : null;
     app.post("/v1/sessions", auth, createRateLimiter({ windowMs: 60_000, limit: 60, keyGenerator: limiterKey }), (req, res, next) => {
         void (async () => {
             const body = sessionsSchema.parse(req.body);
@@ -74,9 +77,13 @@ export function createIdentityGatewayServer() {
     });
     app.post("/v1/media/presign", auth, createRateLimiter({ windowMs: 60_000, limit: 30, keyGenerator: limiterKey }), (req, res, next) => {
         void (async () => {
+            if (!s3 || !s3Config) {
+                res.status(503).json({ error: "storage_not_configured" });
+                return;
+            }
             const body = presignSchema.parse(req.body);
             const command = new PutObjectCommand({
-                Bucket: config.S3_BUCKET,
+                Bucket: s3Config.bucket,
                 Key: body.key,
                 ContentType: body.content_type
             });
@@ -154,6 +161,16 @@ function passthroughHeaders(headers) {
     if (idem)
         out["idempotency-key"] = idem;
     return out;
+}
+function getS3Config(config) {
+    const endpoint = String(config.S3_ENDPOINT ?? "").trim();
+    const region = String(config.S3_REGION ?? "").trim();
+    const bucket = String(config.S3_BUCKET ?? "").trim();
+    const accessKeyId = String(config.S3_ACCESS_KEY_ID ?? "").trim();
+    const secretAccessKey = String(config.S3_SECRET_ACCESS_KEY ?? "").trim();
+    if (!endpoint || !region || !bucket || !accessKeyId || !secretAccessKey)
+        return null;
+    return { endpoint, region, bucket, accessKeyId, secretAccessKey };
 }
 function buildMtlsAgent(opts) {
     const caPath = String(opts.caPath ?? "").trim();

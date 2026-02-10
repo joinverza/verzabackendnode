@@ -66,15 +66,18 @@ export function createIdentityGatewayServer() {
   });
   const limiterKey = (req: any) => (req.auth?.userId ? `u:${req.auth.userId}` : `ip:${req.ip}`);
 
-  const s3 = new S3Client({
-    region: config.S3_REGION,
-    endpoint: config.S3_ENDPOINT,
-    forcePathStyle: config.S3_FORCE_PATH_STYLE,
-    credentials: {
-      accessKeyId: config.S3_ACCESS_KEY_ID,
-      secretAccessKey: config.S3_SECRET_ACCESS_KEY
-    }
-  });
+  const s3Config = getS3Config(config);
+  const s3 = s3Config
+    ? new S3Client({
+        region: s3Config.region,
+        endpoint: s3Config.endpoint,
+        forcePathStyle: config.S3_FORCE_PATH_STYLE,
+        credentials: {
+          accessKeyId: s3Config.accessKeyId,
+          secretAccessKey: s3Config.secretAccessKey
+        }
+      })
+    : null;
 
   app.post(
     "/v1/sessions",
@@ -95,9 +98,13 @@ export function createIdentityGatewayServer() {
     createRateLimiter({ windowMs: 60_000, limit: 30, keyGenerator: limiterKey }),
     (req: Request<Record<string, never>, unknown, unknown>, res, next) => {
     void (async () => {
+      if (!s3 || !s3Config) {
+        res.status(503).json({ error: "storage_not_configured" });
+        return;
+      }
       const body = presignSchema.parse(req.body);
       const command = new PutObjectCommand({
-        Bucket: config.S3_BUCKET,
+        Bucket: s3Config.bucket,
         Key: body.key,
         ContentType: body.content_type
       });
@@ -192,6 +199,22 @@ function passthroughHeaders(headers: Record<string, unknown>): Record<string, st
   const idem = typeof headers["idempotency-key"] === "string" ? headers["idempotency-key"] : undefined;
   if (idem) out["idempotency-key"] = idem;
   return out;
+}
+
+function getS3Config(config: {
+  S3_ENDPOINT?: string | undefined;
+  S3_REGION?: string | undefined;
+  S3_BUCKET?: string | undefined;
+  S3_ACCESS_KEY_ID?: string | undefined;
+  S3_SECRET_ACCESS_KEY?: string | undefined;
+}) {
+  const endpoint = String(config.S3_ENDPOINT ?? "").trim();
+  const region = String(config.S3_REGION ?? "").trim();
+  const bucket = String(config.S3_BUCKET ?? "").trim();
+  const accessKeyId = String(config.S3_ACCESS_KEY_ID ?? "").trim();
+  const secretAccessKey = String(config.S3_SECRET_ACCESS_KEY ?? "").trim();
+  if (!endpoint || !region || !bucket || !accessKeyId || !secretAccessKey) return null;
+  return { endpoint, region, bucket, accessKeyId, secretAccessKey };
 }
 
 function buildMtlsAgent(opts: { caPath?: string | undefined; certPath?: string | undefined; keyPath?: string | undefined }) {

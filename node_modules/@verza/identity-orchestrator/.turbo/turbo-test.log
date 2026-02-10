@@ -6,7 +6,7 @@ TAP version 13
 # Subtest: identity-orchestrator flow: create -> media -> run sync completes
 ok 1 - identity-orchestrator flow: create -> media -> run sync completes
   ---
-  duration_ms: 505.4094
+  duration_ms: 475.6055
   type: 'test'
   ...
 1..1
@@ -17,4 +17,4 @@ ok 1 - identity-orchestrator flow: create -> media -> run sync completes
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 12162.9915
+# duration_ms 13933.168

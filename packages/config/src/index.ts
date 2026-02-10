@@ -99,20 +99,21 @@ export function createMainApiConfig(env: NodeJS.ProcessEnv) {
 
 const identityGatewaySchema = baseSchema.extend({
   PORT: z.coerce.number().default(8088),
-  ORCHESTRATOR_URL: z.string().min(1),
+  ORCHESTRATOR_URL: z.string().min(1).default("http://identity-orchestrator:8089"),
   JWT_SECRET: z.string().min(16),
   JWT_ISSUER: z.string().min(1).default("verza"),
   JWT_AUDIENCE: z.string().min(1).default("verza"),
   ORCHESTRATOR_MTLS_CA_PATH: z.string().optional(),
   ORCHESTRATOR_MTLS_CERT_PATH: z.string().optional(),
   ORCHESTRATOR_MTLS_KEY_PATH: z.string().optional(),
-  S3_ENDPOINT: z.string().min(1),
-  S3_ACCESS_KEY_ID: z.string().min(1),
-  S3_SECRET_ACCESS_KEY: z.string().min(1),
-  S3_BUCKET: z.string().min(1),
-  S3_REGION: z.string().min(1),
+  S3_ENDPOINT: z.string().optional(),
+  S3_ACCESS_KEY_ID: z.string().optional(),
+  S3_SECRET_ACCESS_KEY: z.string().optional(),
+  S3_BUCKET: z.string().optional(),
+  S3_REGION: z.string().optional(),
   S3_FORCE_PATH_STYLE: z
     .string()
+    .optional()
     .default("0")
     .transform((v) => v === "1" || v.toLowerCase() === "true")
 });

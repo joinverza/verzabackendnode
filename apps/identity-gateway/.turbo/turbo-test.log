@@ -3,12 +3,12 @@
 > node --test --test-force-exit dist/**/*.test.js
 
 TAP version 13
-# {"level":30,"time":1770723281515,"service":"identity-gateway","addr":{"address":"127.0.0.1","family":"IPv4","port":57771},"msg":"identity-gateway listening"}
-# {"level":30,"time":1770723281743,"service":"identity-gateway","req":{"id":1,"method":"POST","url":"/v1/sessions","query":{},"params":{},"headers":{"host":"127.0.0.1:57771","connection":"keep-alive","content-type":"application/json","x-request-id":"rid","traceparent":"00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01","accept":"*/*","accept-language":"*","sec-fetch-mode":"cors","user-agent":"node","accept-encoding":"gzip, deflate","content-length":"16"},"remoteAddress":"127.0.0.1","remotePort":57772},"request_id":"rid","trace_id":"00000000000000000000000000000000","span_id":"0000000000000000","res":{"statusCode":200,"headers":{"x-powered-by":"Express","x-request-id":"rid","vary":"Origin","access-control-allow-credentials":"true","ratelimit-policy":"60;w=60","ratelimit-limit":"60","ratelimit-remaining":"59","ratelimit-reset":"60","content-type":"application/json; charset=utf-8","content-length":"25","etag":"W/\\"19-Q8OtLVAAj8lm7sI/nBjoabn3EJk\\""}},"responseTime":126,"msg":"request completed"}
+# {"level":30,"time":1770725028833,"service":"identity-gateway","addr":{"address":"127.0.0.1","family":"IPv4","port":62715},"msg":"identity-gateway listening"}
+# {"level":30,"time":1770725029017,"service":"identity-gateway","req":{"id":1,"method":"POST","url":"/v1/sessions","query":{},"params":{},"headers":{"host":"127.0.0.1:62715","connection":"keep-alive","content-type":"application/json","x-request-id":"rid","traceparent":"00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01","accept":"*/*","accept-language":"*","sec-fetch-mode":"cors","user-agent":"node","accept-encoding":"gzip, deflate","content-length":"16"},"remoteAddress":"127.0.0.1","remotePort":62716},"request_id":"rid","trace_id":"00000000000000000000000000000000","span_id":"0000000000000000","res":{"statusCode":200,"headers":{"x-powered-by":"Express","x-request-id":"rid","vary":"Origin","access-control-allow-credentials":"true","ratelimit-policy":"60;w=60","ratelimit-limit":"60","ratelimit-remaining":"59","ratelimit-reset":"60","content-type":"application/json; charset=utf-8","content-length":"25","etag":"W/\\"19-Q8OtLVAAj8lm7sI/nBjoabn3EJk\\""}},"responseTime":99,"msg":"request completed"}
 # Subtest: identity-gateway proxies sessions and passes key headers
 ok 1 - identity-gateway proxies sessions and passes key headers
   ---
-  duration_ms: 390.1409
+  duration_ms: 378.3657
   type: 'test'
   ...
 1..1
@@ -19,4 +19,4 @@ ok 1 - identity-gateway proxies sessions and passes key headers
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 8878.9124
+# duration_ms 11141.2653

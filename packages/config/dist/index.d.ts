@@ -58,16 +58,16 @@ export declare function createIdentityGatewayConfig(env: NodeJS.ProcessEnv): {
     JWT_ISSUER: string;
     JWT_AUDIENCE: string;
     ORCHESTRATOR_URL: string;
-    S3_ENDPOINT: string;
-    S3_ACCESS_KEY_ID: string;
-    S3_SECRET_ACCESS_KEY: string;
-    S3_BUCKET: string;
-    S3_REGION: string;
     S3_FORCE_PATH_STYLE: boolean;
     NODE_ENV?: string | undefined;
     ORCHESTRATOR_MTLS_CA_PATH?: string | undefined;
     ORCHESTRATOR_MTLS_CERT_PATH?: string | undefined;
     ORCHESTRATOR_MTLS_KEY_PATH?: string | undefined;
+    S3_ENDPOINT?: string | undefined;
+    S3_ACCESS_KEY_ID?: string | undefined;
+    S3_SECRET_ACCESS_KEY?: string | undefined;
+    S3_BUCKET?: string | undefined;
+    S3_REGION?: string | undefined;
 };
 export declare function createIdentityOrchestratorConfig(env: NodeJS.ProcessEnv): {
     HOST: string;
