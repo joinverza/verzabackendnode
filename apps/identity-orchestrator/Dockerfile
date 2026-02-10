@@ -11,7 +11,7 @@ COPY packages/observability/package.json packages/observability/package.json
 COPY packages/types/package.json packages/types/package.json
 RUN npm ci
 COPY . .
-RUN npm run -w @verza/db build && npm run -w @verza/identity-orchestrator build
+RUN npm run build -- --filter=@verza/identity-orchestrator...
 
 FROM node:20-alpine
 WORKDIR /app

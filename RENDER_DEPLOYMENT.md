@@ -21,6 +21,85 @@ The main API and identity orchestrator run DB migrations on startup, so the mana
 4. After resources are created, open each service and set the required environment variables listed below.
 5. Deploy all services.
 
+## Deploy Steps (Manual, No Blueprint)
+
+This is the most reliable way to get running on Render when Blueprint validation keeps failing.
+
+### 1) Create the databases
+
+Create two managed PostgreSQL databases:
+
+- verza-main-db
+- verza-identity-db
+
+After creation, keep each database’s Internal Database URL handy (Render shows it on the database page).
+
+### 2) Create services (Docker)
+
+Create each service from the Render Dashboard:
+
+#### verza-main-api (public web service)
+
+- New → Web Service
+- Connect this repo
+- Runtime: Docker
+- Dockerfile path: apps/main-api/Dockerfile
+
+Set the environment variables listed in the verza-main-api section below, including:
+
+- DATABASE_URL: use verza-main-db’s connection string
+- IDENTITY_GATEWAY_URL: use the identity-gateway internal URL (or its public URL)
+
+Health check path:
+
+- /health
+
+#### identity-gateway (public web service)
+
+- New → Web Service
+- Connect this repo
+- Runtime: Docker
+- Dockerfile path: apps/identity-gateway/Dockerfile
+
+Set the environment variables listed in the identity-gateway section below.
+
+Health check path:
+
+- /healthz
+
+#### identity-orchestrator (private service)
+
+- New → Private Service
+- Connect this repo
+- Runtime: Docker
+- Dockerfile path: apps/identity-orchestrator/Dockerfile
+
+Set the environment variables listed in the identity-orchestrator section below, including:
+
+- IDENTITY_DATABASE_URL: use verza-identity-db’s connection string
+- INFERENCE_URL: use inference’s internal URL
+
+Health check path:
+
+- /healthz
+
+#### inference (private service)
+
+- New → Private Service
+- Connect this repo
+- Runtime: Docker
+- Dockerfile path: apps/inference/Dockerfile
+
+If you want a minimum viable deployment, you can skip inference and set identity-orchestrator’s INFERENCE_URL to a reachable service you control.
+
+### 3) Deploy order
+
+1. Deploy verza-main-db and verza-identity-db first (databases must be ready).
+2. Deploy inference (if used).
+3. Deploy identity-orchestrator (it runs migrations for the identity DB on boot).
+4. Deploy identity-gateway.
+5. Deploy verza-main-api (it runs migrations for the main DB on boot).
+
 ## Environment Variables
 
 Render will inject database connection strings for the two managed databases. Secrets marked as secret should be configured in Render as synced secrets.

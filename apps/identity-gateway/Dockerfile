@@ -11,7 +11,7 @@ COPY packages/observability/package.json packages/observability/package.json
 COPY packages/types/package.json packages/types/package.json
 RUN npm ci
 COPY . .
-RUN npm run -w @verza/identity-gateway build
+RUN npm run build -- --filter=@verza/identity-gateway...
 
 FROM node:20-alpine
 WORKDIR /app
