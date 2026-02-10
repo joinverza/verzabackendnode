@@ -80,7 +80,7 @@ services:
   - type: pserv
     name: identity-orchestrator
     runtime: docker
-    plan: standard
+    plan: starter
     autoDeploy: true
     dockerfilePath: apps/identity-orchestrator/Dockerfile
     dockerContext: .
@@ -123,7 +123,7 @@ services:
   - type: pserv
     name: inference
     runtime: docker
-    plan: standard
+    plan: starter
     autoDeploy: true
     dockerfilePath: apps/inference/Dockerfile
     dockerContext: .
@@ -133,6 +133,6 @@ services:
 
 databases:
   - name: verza-main-db
-    plan: standard
+    plan: starter
   - name: verza-identity-db
-    plan: standard
+    plan: starter
