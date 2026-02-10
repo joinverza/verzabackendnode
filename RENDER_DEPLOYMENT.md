@@ -104,6 +104,20 @@ If you want a minimum viable deployment, you can skip inference and set identity
 
 Render will inject database connection strings for the two managed databases. Secrets marked as secret should be configured in Render as synced secrets.
 
+### Generating secret values
+
+If you’re setting these manually in the Render Dashboard, you can generate safe values like this:
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
+```
+
+Use the output as the value for:
+
+- JWT_SECRET
+- ENCRYPTION_MASTER_KEY_B64
+- RECEIPT_ED25519_SEED_B64
+
 ### verza-main-api (public)
 
 Required:

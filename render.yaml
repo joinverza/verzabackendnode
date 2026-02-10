@@ -15,7 +15,7 @@ services:
           name: verza-main-db
           property: connectionString
       - key: JWT_SECRET
-        sync: false
+        generateValue: true
       - key: JWT_ISSUER
         value: verza
       - key: JWT_AUDIENCE
@@ -25,9 +25,9 @@ services:
       - key: REFRESH_TOKEN_TTL_SECONDS
         value: "2592000"
       - key: ENCRYPTION_MASTER_KEY_B64
-        sync: false
+        generateValue: true
       - key: RECEIPT_ED25519_SEED_B64
-        sync: false
+        generateValue: true
       - key: IDENTITY_GATEWAY_URL
         value: http://identity-gateway:8088
       - key: IDENTITY_RETENTION_DAYS
