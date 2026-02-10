@@ -48,6 +48,7 @@ Create each service from the Render Dashboard:
 Set the environment variables listed in the verza-main-api section below, including:
 
 - DATABASE_URL: use verza-main-db’s connection string
+- PGSSLMODE: require
 - IDENTITY_GATEWAY_URL: use the identity-gateway internal URL (or its public URL)
 
 Health check path:
@@ -77,6 +78,7 @@ Health check path:
 Set the environment variables listed in the identity-orchestrator section below, including:
 
 - IDENTITY_DATABASE_URL: use verza-identity-db’s connection string
+- PGSSLMODE: require
 - INFERENCE_URL: use inference’s internal URL
 
 Health check path:
@@ -124,6 +126,7 @@ Required:
 
 - PORT: 8090
 - DATABASE_URL: from verza-main-db
+- PGSSLMODE: require
 - JWT_SECRET: secret, at least 16 chars
 - JWT_ISSUER: verza
 - JWT_AUDIENCE: verza
@@ -172,6 +175,7 @@ Required:
 
 - PORT: 8089
 - IDENTITY_DATABASE_URL: from verza-identity-db
+- PGSSLMODE: require
 - INFERENCE_URL: http://inference:8087
 - JWT_SECRET: secret, at least 16 chars
 - JWT_ISSUER: verza

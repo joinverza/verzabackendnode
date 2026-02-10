@@ -7,7 +7,40 @@ import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
 
 export function createPgPool(databaseUrl: string) {
-  return new Pool({ connectionString: databaseUrl, max: 10 });
+  const ssl = shouldUsePgSsl(databaseUrl);
+  return new Pool({
+    connectionString: databaseUrl,
+    max: 10,
+    ...(ssl ? { ssl: { rejectUnauthorized: false } } : {})
+  });
+}
+
+function shouldUsePgSsl(databaseUrl: string) {
+  const mode = (process.env.PGSSLMODE ?? "").toLowerCase();
+  if (mode === "disable") return false;
+  if (mode) return true;
+
+  const raw = (process.env.DATABASE_SSL ?? "").toLowerCase();
+  if (raw === "1" || raw === "true") return true;
+  if (raw === "0" || raw === "false") return false;
+
+  try {
+    const u = new URL(databaseUrl);
+    const sslmode = (u.searchParams.get("sslmode") ?? "").toLowerCase();
+    if (sslmode === "disable") return false;
+    if (sslmode) return true;
+
+    const sslParam = (u.searchParams.get("ssl") ?? "").toLowerCase();
+    if (sslParam === "1" || sslParam === "true") return true;
+    if (sslParam === "0" || sslParam === "false") return false;
+
+    const host = (u.hostname ?? "").toLowerCase();
+    if (host.endsWith(".render.com")) return true;
+  } catch {
+    return false;
+  }
+
+  return false;
 }
 
 export async function migrateDatabase(opts: { db: "main" | "identity"; databaseUrl: string; logger: Logger }) {
